@@ -39,6 +39,7 @@ from viflap.analysis.patterns import (
     NormalInverseGammaComparator,
 )
 from viflap.analysis.speaker.gmm import GmmConfig, _expectation_step, train_ubm
+from viflap.analysis.speaker.plda import PldaConfig, train_plda
 from viflap.domain.errors import InsufficientDataError, InvalidEvidenceError
 
 SR = 8000
@@ -434,6 +435,102 @@ class TestExpectationStepChunking:
     def test_chunk_frames_must_be_positive(self) -> None:
         with pytest.raises(InvalidEvidenceError):
             GmmConfig(chunk_frames=0)
+
+
+class TestPldaConvergence:
+    """EM cannot decrease the observed-data likelihood, and now this is checked.
+
+    What the trainer previously tracked was the quadratic data term alone — no
+    ``log|W|``, no ``log|B|``, no latent prior, no posterior-covariance trace.
+    That is neither the observed-data likelihood nor the evidence lower bound,
+    so it carried no monotonicity guarantee, the stopping rule halted wherever
+    it happened to settle, and the standard sanity check on an EM
+    implementation was unavailable.
+    """
+
+    @staticmethod
+    def _corpus(
+        n_speakers: int = 30, per_speaker: int = 3, dimension: int = 6, seed: int = 3
+    ) -> tuple[np.ndarray, np.ndarray]:
+        rng = np.random.default_rng(seed)
+        between = np.diag(rng.uniform(0.5, 3.0, dimension))
+        within = np.diag(rng.uniform(0.2, 1.0, dimension))
+        vectors, labels = [], []
+        for speaker in range(n_speakers):
+            position = rng.multivariate_normal(np.zeros(dimension), between)
+            for _ in range(per_speaker):
+                vectors.append(
+                    position + rng.multivariate_normal(np.zeros(dimension), within)
+                )
+                labels.append(speaker)
+        return np.array(vectors), np.array(labels)
+
+    def test_the_likelihood_never_decreases_across_iteration_budgets(self) -> None:
+        """Black-box monotonicity: more EM can only help.
+
+        Training to a cap of 1, 2, 3 ... and comparing the likelihood each run
+        reports tests the property without reaching into the loop, and would
+        fail on an M-step that improved the tracked quantity while making the
+        model worse.
+        """
+        vectors, labels = self._corpus()
+        values = [
+            train_plda(
+                vectors, labels, PldaConfig(max_iterations=cap, min_speakers=10)
+            ).final_log_likelihood
+            for cap in range(1, 7)
+        ]
+        assert all(np.isfinite(values))
+        for earlier, later in zip(values, values[1:], strict=False):
+            assert later >= earlier - 1e-9
+
+    def test_the_reported_likelihood_belongs_to_the_model_returned(self) -> None:
+        """Stopping early and hitting the cap must both report their own model.
+
+        The loop evaluates the likelihood before the M-step, so on the
+        cap-exhausted path the parameters advance one step past the last
+        evaluation. Reporting that stale value would describe a model the caller
+        never receives.
+        """
+        vectors, labels = self._corpus()
+        capped = train_plda(vectors, labels, PldaConfig(max_iterations=1, min_speakers=10))
+        settled = train_plda(
+            vectors, labels, PldaConfig(max_iterations=50, min_speakers=10)
+        )
+
+        assert capped.n_iterations == 1
+        assert not capped.converged
+        assert settled.converged
+        assert settled.n_iterations <= 50
+        assert settled.final_log_likelihood >= capped.final_log_likelihood - 1e-9
+
+    def test_convergence_diagnostics_reach_the_model_description(self) -> None:
+        vectors, labels = self._corpus()
+        model = train_plda(vectors, labels, PldaConfig(min_speakers=10))
+        diagnostics = model.diagnostics()
+
+        assert diagnostics["n_iterations"] >= 1.0
+        assert diagnostics["converged"] == 1.0
+        assert np.isfinite(diagnostics["final_log_likelihood"])
+
+    def test_heavy_tailed_data_still_converges_monotonically(self) -> None:
+        """The guard must not fire on data the model merely fits badly.
+
+        A decrease means the update equations are wrong. Misspecification is a
+        different thing and has to remain trainable, or the check would be
+        rejecting corpora rather than defects.
+        """
+        rng = np.random.default_rng(11)
+        vectors, labels = [], []
+        for speaker in range(30):
+            position = rng.standard_t(3, 6) * 2.0
+            for _ in range(int(rng.integers(2, 7))):
+                vectors.append(position + rng.standard_t(2, 6) * 0.5)
+                labels.append(speaker)
+
+        model = train_plda(np.array(vectors), np.array(labels), PldaConfig(min_speakers=10))
+        assert np.isfinite(model.final_log_likelihood)
+        assert model.n_iterations > 1
 
 
 class TestConjugateComparators:

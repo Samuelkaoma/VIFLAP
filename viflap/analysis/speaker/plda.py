@@ -117,6 +117,24 @@ class PldaModel:
     n_training_speakers: int
     n_training_recordings: int
 
+    n_iterations: int = 0
+    """EM iterations actually run, which is not the configured maximum.
+
+    Zero on models trained before this was recorded, which means unknown rather
+    than none."""
+
+    final_log_likelihood: float = float("nan")
+    """Observed-data log-likelihood per recording at the parameters returned.
+
+    The quantity the stopping rule reads. Recorded because a stopping rule is
+    only interpretable beside the value it stopped at: a run that halted after
+    three iterations at a likelihood still climbing steeply and a run that
+    halted after forty at a flat one are different models, and the iteration
+    count alone does not distinguish them."""
+
+    converged: bool = False
+    """Whether the tolerance was met, as against the iteration cap being hit."""
+
     def __post_init__(self) -> None:
         if np.any(self.psi < 0.0):
             raise InvalidEvidenceError(
@@ -212,6 +230,9 @@ class PldaModel:
             "psi_max": float(np.max(self.psi)),
             "n_training_speakers": float(self.n_training_speakers),
             "n_training_recordings": float(self.n_training_recordings),
+            "n_iterations": float(self.n_iterations),
+            "final_log_likelihood": float(self.final_log_likelihood),
+            "converged": float(self.converged),
         }
 
 
@@ -283,13 +304,49 @@ def train_plda(
     between, within = _initialise_covariances(centred, groups, dimension, config)
 
     previous = -np.inf
+    objective = float("nan")
+    converged = False
+    iterations_run = 0
+
     for iteration in range(config.max_iterations):
         between_inverse = _stable_inverse(between, config.regularisation)
         within_inverse = _stable_inverse(within, config.regularisation)
 
+        # Evaluated at the parameters this iteration starts from, so the
+        # recorded sequence is L(theta_0), L(theta_1), ... and EM's guarantee
+        # applies to consecutive entries. Computing it after the M-step instead
+        # would interleave two different parameter sets and the monotonicity
+        # check below would be testing nothing.
+        objective = _observed_log_likelihood(
+            centred, groups, between, within, between_inverse, within_inverse, config
+        )
+        iterations_run = iteration + 1
+
+        # EM cannot decrease the observed-data likelihood. A decrease is a
+        # defect in the update equations, not a property of the data, and it is
+        # the one check that distinguishes a correct M-step from a plausible
+        # wrong one — so it is enforced rather than logged. The tolerance
+        # absorbs the ridge added to both covariances, which perturbs the exact
+        # EM by a little and can cost a few units in the last place.
+        if iteration > 0 and objective < previous - 1e-6 * max(abs(previous), 1.0):
+            raise ConvergenceError(
+                "the PLDA observed-data log-likelihood decreased, which "
+                "expectation-maximisation cannot do; the update equations are "
+                "wrong rather than the data being difficult",
+                iteration=iteration,
+                previous=round(previous, 9),
+                current=round(objective, 9),
+            )
+
+        if iteration > 0 and abs(objective - previous) < config.tolerance * max(
+            abs(previous), 1.0
+        ):
+            converged = True
+            break
+        previous = objective
+
         accumulated_between = np.zeros((dimension, dimension))
         accumulated_within = np.zeros((dimension, dimension))
-        log_likelihood = 0.0
         n_recordings = 0
 
         # Speakers with the same recording count share a posterior precision, so
@@ -317,8 +374,6 @@ def train_plda(
 
             residuals = observations - posterior_mean
             accumulated_within += residuals.T @ residuals + count * posterior_covariance
-
-            log_likelihood += float(-0.5 * np.sum(residuals @ within_inverse * residuals))
             n_recordings += count
 
         between = accumulated_between / len(groups)
@@ -331,13 +386,21 @@ def train_plda(
             raise ConvergenceError(
                 "PLDA training produced non-finite covariances", iteration=iteration
             )
-
-        objective = log_likelihood / max(n_recordings, 1)
-        if iteration > 0 and abs(objective - previous) < config.tolerance * max(
-            abs(previous), 1.0
-        ):
-            break
-        previous = objective
+    else:
+        # The cap was reached rather than the tolerance met, so the last thing
+        # the loop did was an M-step and the parameters have moved past the last
+        # objective evaluated. Re-evaluating costs one pass and keeps the
+        # reported likelihood a property of the model actually returned, which
+        # is the only reading of it that means anything.
+        objective = _observed_log_likelihood(
+            centred,
+            groups,
+            between,
+            within,
+            _stable_inverse(between, config.regularisation),
+            _stable_inverse(within, config.regularisation),
+            config,
+        )
 
     transform, psi = _simultaneous_diagonalisation(between, within, config.regularisation)
 
@@ -347,7 +410,82 @@ def train_plda(
         psi=psi,
         n_training_speakers=int(unique_speakers.size),
         n_training_recordings=int(vectors.shape[0]),
+        n_iterations=iterations_run,
+        final_log_likelihood=objective,
+        converged=converged,
     )
+
+
+def _observed_log_likelihood(
+    centred: NDArray[np.float64],
+    groups: list[NDArray[np.int64]],
+    between: NDArray[np.float64],
+    within: NDArray[np.float64],
+    between_inverse: NDArray[np.float64],
+    within_inverse: NDArray[np.float64],
+    config: PldaConfig,
+) -> float:
+    """Observed-data log-likelihood per recording, marginalising the latent term.
+
+    The quantity that was previously tracked was the quadratic data term alone —
+    no ``log|W|``, no ``log|B|``, no latent prior and no posterior-covariance
+    trace. That is neither the observed-data likelihood nor the evidence lower
+    bound, and nothing guarantees it increases, so the stopping rule was halting
+    wherever a quantity with no monotonicity property happened to settle and the
+    standard sanity check on an EM implementation was unavailable.
+
+    For speaker ``s`` the ``n_s`` observations are jointly Gaussian with
+    covariance ``I ⊗ W + 11ᵀ ⊗ B``. The determinant lemma and Woodbury reduce
+    that to quantities the E-step already forms:
+
+    .. code-block:: text
+
+        log|Σ_s| = n_s log|W| + log|B| - log|Cov_s|
+        xᵀ Σ_s⁻¹ x = Σ_i x_iᵀ W⁻¹ x_i - (Σ_i x_i)ᵀ W⁻¹ Cov_s W⁻¹ (Σ_i x_i)
+
+    with ``Cov_s = (B⁻¹ + n_s W⁻¹)⁻¹``. So the exact marginal costs one extra
+    determinant per distinct recording count, not per speaker, and the cache
+    that already exists for the posterior covariance serves both.
+
+    Divided by the recording count so the number is comparable across corpora
+    and the tolerance means the same thing on 600 recordings as on 1,500.
+    """
+    dimension = centred.shape[1]
+    sign_within, log_det_within = np.linalg.slogdet(within)
+    sign_between, log_det_between = np.linalg.slogdet(between)
+    if sign_within <= 0 or sign_between <= 0:
+        raise ConvergenceError(
+            "a PLDA covariance stopped being positive definite during training",
+            within_determinant_sign=float(sign_within),
+            between_determinant_sign=float(sign_between),
+        )
+
+    posterior_cache: dict[int, tuple[NDArray[np.float64], float]] = {}
+    total = 0.0
+    n_recordings = 0
+
+    for indices in groups:
+        count = int(indices.size)
+        if count not in posterior_cache:
+            covariance = _stable_inverse(
+                between_inverse + count * within_inverse, config.regularisation
+            )
+            _, log_det_covariance = np.linalg.slogdet(covariance)
+            posterior_cache[count] = (covariance, float(log_det_covariance))
+        covariance, log_det_covariance = posterior_cache[count]
+
+        observations = centred[indices]
+        summed = observations.sum(axis=0)
+        quadratic = float(np.sum(observations @ within_inverse * observations)) - float(
+            summed @ within_inverse @ covariance @ within_inverse @ summed
+        )
+        log_determinant = count * log_det_within + log_det_between - log_det_covariance
+        total += -0.5 * (
+            count * dimension * float(np.log(2.0 * np.pi)) + log_determinant + quadratic
+        )
+        n_recordings += count
+
+    return total / max(n_recordings, 1)
 
 
 def _initialise_covariances(
