@@ -1865,40 +1865,56 @@ been computed over different populations. Everything below is therefore on the
 506 recordings every model embedded at every duration, which is why the 30 s
 baseline reads 0.274 here against 0.276 in §9.
 
-### Result: 94% of the duration effect survives
+### Result: 94% and 97% of the duration effect survives
 
-Utterance-level control against the baseline. Negative means the control
-discriminates better.
+`C_llr_min` per duration, both controls against the same baseline. Negative
+means the control discriminates better.
 
-| Duration | 300 frames | utterance | Paired difference [95% CI] | p |
-|---:|---:|---:|---|---:|
-| 30 s | 0.274 | 0.266 | −0.007 [−0.017, +0.004] | 0.205 |
-| 15 s | 0.351 | 0.331 | −0.020 [−0.034, −0.005] | 0.007 |
-| 5 s | 0.539 | 0.514 | −0.024 [−0.041, −0.008] | 0.002 |
+| Duration | 300 frames | utterance | diff [95% CI] | p | 100 frames | diff [95% CI] | p |
+|---:|---:|---:|---|---:|---:|---|---:|
+| 30 s | 0.274 | **0.266** | −0.007 [−0.017, +0.004] | 0.205 | 0.288 | +0.015 [+0.004, +0.029] | 0.006 |
+| 15 s | 0.351 | **0.331** | −0.020 [−0.034, −0.005] | 0.007 | 0.362 | +0.011 [−0.007, +0.028] | 0.215 |
+| 5 s | 0.539 | **0.514** | −0.024 [−0.041, −0.008] | 0.002 | 0.545 | +0.007 [−0.010, +0.024] | 0.366 |
 
 And the duration gaps themselves, which is the question:
 
-| Gap | 300 frames | utterance | Contrast [95% CI] | p | Surviving |
+| Gap | 300 frames | Control | Contrast [95% CI] | p | Surviving |
 |---|---:|---:|---|---:|---:|
-| 30 s → 15 s | +0.077 [+0.059, +0.109] | +0.065 [+0.045, +0.089] | −0.013 [−0.028, +0.002] | 0.080 | **84%** |
-| 30 s → 5 s | +0.265 [+0.215, +0.309] | +0.248 [+0.195, +0.295] | −0.017 [−0.037, +0.001] | 0.079 | **94%** |
+| 30 s → 15 s | +0.077 [+0.059, +0.109] | utterance +0.065 | −0.013 [−0.028, +0.002] | 0.080 | **84%** |
+| 30 s → 15 s | +0.077 [+0.059, +0.109] | 100 frames +0.074 | −0.003 [−0.017, +0.010] | 0.494 | **96%** |
+| 30 s → 5 s | +0.265 [+0.215, +0.309] | utterance +0.248 | −0.017 [−0.037, +0.001] | 0.079 | **94%** |
+| 30 s → 5 s | +0.265 [+0.215, +0.309] | 100 frames +0.257 | −0.008 [−0.025, +0.011] | 0.369 | **97%** |
 
 **The confound is real in direction and small in size.** Holding the front-end
-duration-invariant shrinks the 30 s→5 s gap by 0.017 of 0.265 — six percent —
-and the contrast does not exclude zero at either duration, before or after
-Holm-Bonferroni over the two.
+duration-invariant shrinks the 30 s→5 s gap by 0.017 at most — six percent — and
+no contrast excludes zero, at either duration, under either control, before or
+after Holm-Bonferroni within each run.
 
-§5's headline therefore stands, and stands on firmer ground than it did: the
-duration effect is duration, not the normalisation window changing behaviour
-underneath it. That was the outcome hoped for when the check was proposed, which
-is a reason to state the arithmetic rather than the conclusion — 0.248 of 0.265,
-with an interval that includes no change at all.
+That the two controls agree is what makes this more than one arm's result. They
+fix the window in opposite directions and differ from each other in level by
+0.022 at 30 s, yet both return 94–97% of the duration gap. The answer does not
+depend on which way the window was held still.
+
+§5's headline therefore stands, and on firmer ground than it did: the duration
+effect is duration, not the normalisation window changing behaviour underneath
+it. That was the outcome hoped for when the check was proposed, which is a
+reason to state the arithmetic rather than the conclusion — 0.248 and 0.257 of
+0.265, with intervals that both include no change at all.
 
 ### A second finding, which was not the one being looked for
 
-The control is **better at every duration**, and significantly so at two of the
-three. EER falls from 7.86% to 7.62% at 30 s and from 16.87% to 15.72% at 5 s.
-The sliding window is not merely neutral here; it is costing something.
+The three arms order themselves cleanly, and in the same direction at every
+duration:
+
+| | 30 s | 15 s | 5 s |
+|---|---:|---:|---:|
+| utterance-level | **0.266** (EER 7.62%) | **0.331** (9.09%) | **0.514** (15.72%) |
+| 300 frames | 0.274 (7.86%) | 0.351 (9.91%) | 0.539 (16.87%) |
+| 100 frames | 0.288 (8.30%) | 0.362 (9.95%) | 0.545 (16.58%) |
+
+**The more global the normalisation, the better this system discriminates.** The
+sliding window is not merely neutral here; it is costing something, and a
+shorter one costs more.
 
 The mechanism is in the docstring that justifies it. The window is 300 frames
 because *"AMR rate adaptation changes the effective channel within a single call
@@ -1910,13 +1926,19 @@ anywhere varies the rate within a recording. The sliding window is paying the
 cost of a noisier estimate from fewer frames for a benefit the degradation model
 cannot deliver.
 
+The monotone ordering is the evidence for that reading. If there were
+within-recording channel variation to track, a local estimate would recover
+something and the ordering would not be monotone in how global the estimate is.
+It is: every step toward a global estimate helps, at every duration.
+
 That scopes the finding rather than settling it. On real AMR with rate
 adaptation the sliding window may well earn its keep, and §16's unvalidated
-channel is the reason this cannot be decided here. What can be said is narrower
-and still worth saying: **through this channel the sliding window is a small net
-loss, and the baseline model in §§4–15 is very slightly worse than it needed to
-be.** The effect is a few thousandths of `C_llr_min` at 30 s and nothing in this
-document turns on it.
+channel is the reason this cannot be decided here — it is a direct prediction
+the reference coder would test, since AMR rate adaptation is exactly what the
+parametric model omits. What can be said is narrower and still worth saying:
+**through this channel the sliding window is a small net loss, and the baseline
+model in §§4–15 is very slightly worse than it needed to be.** The effect is
+0.008 of `C_llr_min` at 30 s and nothing in this document turns on it.
 
 ### What this does not establish
 
@@ -1928,6 +1950,12 @@ noise cells are where a sliding window would most plausibly pay.
 comparison rules out the specific artefact of a window that changes character
 with duration; it does not say what the best normalisation for this front-end
 would be.
+
+**The intervals here predate the trial-ownership correction of §18** and are
+therefore the wider, pre-correction ones. That is the conservative direction for
+a contrast asked to exclude zero, and none of them does, so the conclusion is
+unaffected: a narrower interval could only have made the finding harder to
+dismiss, not easier.
 
 **The 5 s figures remain survivor figures.** 12 recordings were refused at 5 s
 and the metric is computed over what remained, exactly as §6 describes. The
