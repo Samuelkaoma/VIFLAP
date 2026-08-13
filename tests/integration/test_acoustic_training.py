@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable, Sequence
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -28,6 +29,7 @@ from numpy.typing import NDArray
 from viflap.analysis.speaker.gmm import GmmConfig
 from viflap.analysis.speaker.ivector import TotalVariabilityConfig
 from viflap.analysis.speaker.pipeline import (
+    FrontEndConfig,
     SpeakerComparisonSystem,
     SpeakerSystemConfig,
     TrainingRecording,
@@ -299,6 +301,52 @@ class TestBackgroundCorpusTraining:
 
         assert embedding.model_id == system.model_id
         assert np.isfinite(embedding.vector).all()
+
+
+class TestArchiveRoundTrip:
+    """A model that cannot be reloaded is not a model, and this failed silently.
+
+    ``training_speakers`` was written as a numpy object array, which numpy will
+    only read back by unpickling — and :meth:`load` reads with
+    ``allow_pickle=False``, as anything loading a file from disk should. So
+    every archive that recorded its training speakers refused to load, and the
+    leakage check those speakers exist for could not run on any model that had
+    them. Nothing caught it because no test saved a model and loaded it again.
+    """
+
+    def test_a_saved_model_loads_and_keeps_its_training_speakers(
+        self, labelled: list[TrainingRecording], tmp_path: Path
+    ) -> None:
+        system = SpeakerComparisonSystem.train(labelled, _tiny_config())
+        assert system.training_speakers, "the fixture should have labelled speakers"
+
+        path = tmp_path / "model.npz"
+        system.save(path)
+        reloaded = SpeakerComparisonSystem.load(path)
+
+        assert reloaded.model_id == system.model_id
+        assert reloaded.training_speakers == system.training_speakers
+        assert reloaded.config.front_end.sliding_cmvn_frames == (
+            system.config.front_end.sliding_cmvn_frames
+        )
+
+    def test_a_non_default_normalisation_window_survives_the_archive(
+        self, labelled: list[TrainingRecording], tmp_path: Path
+    ) -> None:
+        """The window is part of the front-end a model was fitted to.
+
+        Losing it on save would leave the model scoring through a front-end it
+        never saw, which produces numbers rather than an error.
+        """
+        system = SpeakerComparisonSystem.train(
+            labelled, _tiny_config(front_end=FrontEndConfig(sliding_cmvn_frames=0))
+        )
+        path = tmp_path / "utterance-cmvn.npz"
+        system.save(path)
+
+        reloaded = SpeakerComparisonSystem.load(path)
+        assert reloaded.config.front_end.sliding_cmvn_frames == 0
+        assert reloaded.model_id == system.model_id
 
 
 class TestEvenlySpaced:

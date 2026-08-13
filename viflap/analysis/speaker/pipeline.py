@@ -586,7 +586,12 @@ class SpeakerComparisonSystem:
             plda_recordings=np.array([self._plda.n_training_recordings]),
             training_summary=np.array([json.dumps(self._training_summary)]),
             config=np.array([json.dumps(_config_to_dict(self._config))]),
-            training_speakers=np.array(sorted(self._training_speakers), dtype=object),
+            # A unicode array, not an object array. numpy will only unpickle an
+            # object array, :meth:`load` reads with ``allow_pickle=False`` as it
+            # must, and the two together made every archive that recorded its
+            # training speakers unloadable — the leakage check this exists for
+            # could not run on any model that had it.
+            training_speakers=np.array(sorted(self._training_speakers), dtype=np.str_),
         )
 
     @classmethod
