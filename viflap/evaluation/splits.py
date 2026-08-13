@@ -25,7 +25,7 @@ evaluation resampling over transcripts has the same defect for the same reason.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Hashable, Sequence
+from collections.abc import Callable, Hashable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TypeVar
 
@@ -38,6 +38,7 @@ from viflap.domain.metrics import Estimate
 
 __all__ = [
     "SpeakerDisjointSplit",
+    "bootstrap_contrast_over_speakers",
     "bootstrap_over_speakers",
     "make_folds",
     "paired_bootstrap_over_speakers",
@@ -162,6 +163,148 @@ def verify_disjoint(
         )
 
 
+def bootstrap_contrast_over_speakers(
+    statistic: Callable[[Mapping[str, NDArray[np.float64]], NDArray[np.int64]], float],
+    score_sets: Mapping[str, NDArray[np.float64]],
+    labels: NDArray[np.int64],
+    speakers: Sequence[Hashable],
+    n_resamples: int = 1000,
+    confidence_level: float = 0.95,
+    seed: int = 0,
+    *,
+    with_p_value: bool = False,
+) -> Estimate:
+    """Interval for any statistic computed from several aligned score vectors.
+
+    The general form of the two functions below, and the one to reach for when
+    the quantity of interest is not a metric or a difference of two but a
+    contrast of contrasts — for instance, *how much a front-end change moves the
+    gap between two durations*, which is a difference of two differences over
+    four score vectors.
+
+    Every vector in ``score_sets`` must be scored on the same trials in the same
+    order, since one set of ``labels`` and ``speakers`` indexes all of them. The
+    caller is responsible for that alignment: a system that refused a different
+    subset of recordings produces a different trial list, and the misalignment
+    is silent rather than an error.
+
+    ``statistic`` receives the resampled vectors under the same keys and the
+    resampled labels, and returns one number. Resamples on which it raises, and
+    resamples containing only one class, are discarded and counted rather than
+    substituted for.
+
+    ``with_p_value`` attaches a two-sided p-value against zero, derived through
+    the same BCa transformation as the interval so that the two cannot disagree.
+    It is meaningful only where zero is the null — a difference or a contrast —
+    which is why it is off by default rather than always computed.
+    """
+    prepared = {
+        name: np.asarray(vector, dtype=np.float64) for name, vector in score_sets.items()
+    }
+    if not prepared:
+        raise InvalidEvidenceError("no score vectors were supplied to resample")
+
+    labels = np.asarray(labels)
+    lengths = {name: int(vector.shape[0]) for name, vector in prepared.items()}
+    if set(lengths.values()) != {labels.shape[0]} or labels.shape[0] != len(speakers):
+        raise InvalidEvidenceError(
+            "every score vector, the labels and the speaker identifiers must be "
+            "the same length; a mismatch means the vectors are not scored on the "
+            "same trials and no contrast between them is meaningful",
+            lengths=lengths,
+            n_labels=int(labels.shape[0]),
+            n_speakers=len(speakers),
+        )
+
+    by_speaker: dict[Hashable, list[int]] = defaultdict(list)
+    for index, speaker in enumerate(speakers):
+        by_speaker[speaker].append(index)
+
+    unique = sorted(by_speaker, key=str)
+    if len(unique) < 3:
+        raise InsufficientDataError(
+            "resampling over speakers needs at least three speakers; with fewer, "
+            "the interval describes those speakers rather than the population",
+            n_speakers=len(unique),
+        )
+
+    point = float(statistic(prepared, labels))
+    rng = np.random.default_rng(seed)
+    values: list[float] = []
+
+    for _ in range(n_resamples):
+        drawn = rng.choice(len(unique), size=len(unique), replace=True)
+        indices = [i for position in drawn for i in by_speaker[unique[position]]]
+        if not indices:
+            continue
+        resampled_labels = labels[indices]
+        if np.unique(resampled_labels).size < 2:
+            continue
+        try:
+            values.append(
+                float(
+                    statistic(
+                        {name: vector[indices] for name, vector in prepared.items()},
+                        resampled_labels,
+                    )
+                )
+            )
+        except Exception:
+            continue
+
+    if len(values) < max(30, n_resamples // 20):
+        raise InsufficientDataError(
+            "too few resamples produced a computable value; the speaker set is "
+            "too small or too unbalanced for a meaningful interval",
+            n_usable=len(values),
+            n_attempted=n_resamples,
+        )
+
+    # Delete-one-speaker jackknife, for the acceleration term. One extra
+    # evaluation per speaker — negligible beside the resampling, and without it
+    # the interval cannot be corrected for the skew that a resubstitution
+    # statistic guarantees.
+    jackknife: list[float] = []
+    for omitted in range(len(unique)):
+        indices = [
+            i
+            for position, speaker in enumerate(unique)
+            if position != omitted
+            for i in by_speaker[speaker]
+        ]
+        kept_labels = labels[indices]
+        if np.unique(kept_labels).size < 2:
+            continue
+        try:
+            jackknife.append(
+                float(
+                    statistic(
+                        {name: vector[indices] for name, vector in prepared.items()},
+                        kept_labels,
+                    )
+                )
+            )
+        except Exception:
+            continue
+
+    array = np.array(values)
+    accelerations = np.array(jackknife)
+    lower, upper, method = _bca_bounds(point, array, accelerations, confidence_level)
+    return Estimate(
+        value=point,
+        lower=lower,
+        upper=upper,
+        confidence_level=confidence_level,
+        resampling_unit="speakers",
+        n_resamples=len(values),
+        interval_method=method,
+        n_discarded=n_resamples - len(values),
+        p_value_vs_zero=(
+            _bca_p_value(array, accelerations, point) if with_p_value else None
+        ),
+    )
+
+
 def bootstrap_over_speakers(
     metric: Callable[[NDArray[np.float64], NDArray[np.int64]], float],
     scores: NDArray[np.float64],
@@ -184,84 +327,14 @@ def bootstrap_over_speakers(
     itself a finding — it means the estimate rests on a handful of speakers and
     the interval, however computed, is optimistic.
     """
-    scores = np.asarray(scores, dtype=np.float64)
-    labels = np.asarray(labels)
-    if not (scores.shape[0] == labels.shape[0] == len(speakers)):
-        raise InvalidEvidenceError(
-            "scores, labels and speaker identifiers must be the same length",
-            n_scores=int(scores.shape[0]),
-            n_labels=int(labels.shape[0]),
-            n_speakers=len(speakers),
-        )
-
-    by_speaker: dict[Hashable, list[int]] = defaultdict(list)
-    for index, speaker in enumerate(speakers):
-        by_speaker[speaker].append(index)
-
-    unique = sorted(by_speaker, key=str)
-    if len(unique) < 3:
-        raise InsufficientDataError(
-            "resampling over speakers needs at least three speakers; with fewer, "
-            "the interval describes those speakers rather than the population",
-            n_speakers=len(unique),
-        )
-
-    point = float(metric(scores, labels))
-    rng = np.random.default_rng(seed)
-    values: list[float] = []
-
-    for _ in range(n_resamples):
-        drawn = rng.choice(len(unique), size=len(unique), replace=True)
-        indices = [i for position in drawn for i in by_speaker[unique[position]]]
-        if not indices:
-            continue
-        resampled_labels = labels[indices]
-        if np.unique(resampled_labels).size < 2:
-            continue
-        try:
-            values.append(float(metric(scores[indices], resampled_labels)))
-        except Exception:
-            continue
-
-    if len(values) < max(30, n_resamples // 20):
-        raise InsufficientDataError(
-            "too few resamples produced a computable metric; the speaker set is "
-            "too small or too unbalanced for a meaningful interval",
-            n_usable=len(values),
-            n_attempted=n_resamples,
-        )
-
-    # Delete-one-speaker jackknife, for the acceleration term. One extra metric
-    # evaluation per speaker — negligible beside the resampling, and without it
-    # the interval cannot be corrected for the skew that a resubstitution
-    # statistic guarantees.
-    jackknife: list[float] = []
-    for omitted in range(len(unique)):
-        indices = [
-            i
-            for position, speaker in enumerate(unique)
-            if position != omitted
-            for i in by_speaker[speaker]
-        ]
-        kept_labels = labels[indices]
-        if np.unique(kept_labels).size < 2:
-            continue
-        try:
-            jackknife.append(float(metric(scores[indices], kept_labels)))
-        except Exception:
-            continue
-
-    array = np.array(values)
-    lower, upper, method = _bca_bounds(point, array, np.array(jackknife), confidence_level)
-    return Estimate(
-        value=point,
-        lower=lower,
-        upper=upper,
+    return bootstrap_contrast_over_speakers(
+        lambda vectors, resampled: metric(vectors["scores"], resampled),
+        {"scores": scores},
+        labels,
+        speakers,
+        n_resamples=n_resamples,
         confidence_level=confidence_level,
-        resampling_unit="speakers",
-        n_resamples=len(values),
-        interval_method=method,
-        n_discarded=n_resamples - len(values),
+        seed=seed,
     )
 
 
@@ -420,103 +493,23 @@ def paired_bootstrap_over_speakers(
 
     A negative value means the variant scores better than the baseline, for a
     metric like ``C_llr_min`` where lower is better.
+
+    The p-value it carries is floored at 1/B rather than allowed to reach zero:
+    with B resamples the smallest observable p-value is 1/B, and reporting zero
+    would claim a precision the resampling cannot deliver. It is carried at all
+    so a family of these comparisons can be corrected for multiplicity —
+    reporting only "the interval excludes zero" leaves nothing for a correction
+    to consume, and the correction then silently never happens.
     """
-    baseline_scores = np.asarray(baseline_scores, dtype=np.float64)
-    variant_scores = np.asarray(variant_scores, dtype=np.float64)
-    labels = np.asarray(labels)
-    if not (
-        baseline_scores.shape[0]
-        == variant_scores.shape[0]
-        == labels.shape[0]
-        == len(speakers)
-    ):
-        raise InvalidEvidenceError(
-            "paired scores, labels and speaker identifiers must be the same length",
-            n_baseline=int(baseline_scores.shape[0]),
-            n_variant=int(variant_scores.shape[0]),
-            n_labels=int(labels.shape[0]),
-            n_speakers=len(speakers),
-        )
-
-    by_speaker: dict[Hashable, list[int]] = defaultdict(list)
-    for index, speaker in enumerate(speakers):
-        by_speaker[speaker].append(index)
-
-    unique = sorted(by_speaker, key=str)
-    if len(unique) < 3:
-        raise InsufficientDataError(
-            "resampling over speakers needs at least three speakers; with fewer, "
-            "the interval describes those speakers rather than the population",
-            n_speakers=len(unique),
-        )
-
-    point = float(metric(variant_scores, labels)) - float(metric(baseline_scores, labels))
-    rng = np.random.default_rng(seed)
-    values: list[float] = []
-
-    for _ in range(n_resamples):
-        drawn = rng.choice(len(unique), size=len(unique), replace=True)
-        indices = [i for position in drawn for i in by_speaker[unique[position]]]
-        if not indices:
-            continue
-        resampled_labels = labels[indices]
-        if np.unique(resampled_labels).size < 2:
-            continue
-        try:
-            difference = float(metric(variant_scores[indices], resampled_labels)) - float(
-                metric(baseline_scores[indices], resampled_labels)
-            )
-        except Exception:
-            continue
-        values.append(difference)
-
-    if len(values) < max(30, n_resamples // 20):
-        raise InsufficientDataError(
-            "too few resamples produced a computable difference; the speaker set "
-            "is too small or too unbalanced for a meaningful interval",
-            n_usable=len(values),
-            n_attempted=n_resamples,
-        )
-
-    jackknife: list[float] = []
-    for omitted in range(len(unique)):
-        indices = [
-            i
-            for position, speaker in enumerate(unique)
-            if position != omitted
-            for i in by_speaker[speaker]
-        ]
-        kept_labels = labels[indices]
-        if np.unique(kept_labels).size < 2:
-            continue
-        try:
-            jackknife.append(
-                float(metric(variant_scores[indices], kept_labels))
-                - float(metric(baseline_scores[indices], kept_labels))
-            )
-        except Exception:
-            continue
-
-    array = np.array(values)
-    lower, upper, method = _bca_bounds(point, array, np.array(jackknife), confidence_level)
-
-    # Two-sided bootstrap p-value against a null of no difference. Floored at
-    # 1/B rather than allowed to reach zero: with B resamples the smallest
-    # observable p-value is 1/B, and reporting zero would claim a precision the
-    # resampling cannot deliver. Carried so a family of these comparisons can be
-    # corrected for multiplicity — reporting only "the interval excludes zero"
-    # leaves nothing for a correction to consume, and the correction then
-    # silently never happens.
-    p_value = _bca_p_value(array, np.array(jackknife), point)
-
-    return Estimate(
-        value=point,
-        lower=lower,
-        upper=upper,
+    return bootstrap_contrast_over_speakers(
+        lambda vectors, resampled: (
+            metric(vectors["variant"], resampled) - metric(vectors["baseline"], resampled)
+        ),
+        {"baseline": baseline_scores, "variant": variant_scores},
+        labels,
+        speakers,
+        n_resamples=n_resamples,
         confidence_level=confidence_level,
-        resampling_unit="speakers",
-        n_resamples=len(values),
-        interval_method=method,
-        n_discarded=n_resamples - len(values),
-        p_value_vs_zero=p_value,
+        seed=seed,
+        with_p_value=True,
     )

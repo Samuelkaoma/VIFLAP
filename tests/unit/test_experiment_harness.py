@@ -19,6 +19,7 @@ import pytest
 import soundfile as sf
 
 from scripts.compare_capacity import _common_survivors
+from scripts.compare_cmvn import restrict_to_common_survivors
 from scripts.corpus import (
     Recording,
     materialise,
@@ -40,6 +41,7 @@ from viflap.analysis.channel.degradation import DegradationCondition
 from viflap.analysis.speaker.pipeline import _ubm_training_frames
 from viflap.domain.errors import InsufficientDataError, InvalidEvidenceError
 from viflap.evaluation.splits import (
+    bootstrap_contrast_over_speakers,
     bootstrap_over_speakers,
     paired_bootstrap_over_speakers,
 )
@@ -522,6 +524,126 @@ class TestPairedComparison:
             )
 
 
+class TestContrastOfContrasts:
+    """The quantity a confounded factor needs: a difference of two differences.
+
+    Asking how much of a duration effect survives a front-end change is not a
+    metric and not a paired difference. It is the gap between two durations
+    under one front-end set against the same gap under another, over four score
+    vectors on one set of trials — and it needs an interval like everything
+    else here.
+    """
+
+    def _four_vectors(
+        self, short_penalty: float, confounded: float, n_speakers: int = 20, seed: int = 5
+    ) -> tuple[dict[str, np.ndarray], np.ndarray, list[str]]:
+        """Two front-ends at two durations, with a known duration effect.
+
+        ``short_penalty`` is the genuine cost of the shorter duration and is
+        common to both front-ends. ``confounded`` is an extra cost the baseline
+        front-end suffers at the short duration only — the confound — so the
+        contrast of contrasts should recover ``-confounded``.
+        """
+        rng = np.random.default_rng(seed)
+        vectors: dict[str, list[float]] = {
+            "baseline_long": [],
+            "baseline_short": [],
+            "fixed_long": [],
+            "fixed_short": [],
+        }
+        labels: list[int] = []
+        speakers: list[str] = []
+
+        for speaker in range(n_speakers):
+            offset = rng.normal(0.0, 1.5)
+            for label in (1, 0):
+                for _ in range(8):
+                    base = rng.normal(1.0 if label else -1.0, 1.0) + offset
+                    # Shortening pulls the same-source scores down toward the
+                    # different-source ones, which is how duration degrades
+                    # discrimination. Different-source scores are left alone.
+                    penalty = short_penalty if label else 0.0
+                    extra = confounded if label else 0.0
+                    vectors["baseline_long"].append(base)
+                    vectors["fixed_long"].append(base)
+                    vectors["baseline_short"].append(base - penalty - extra)
+                    vectors["fixed_short"].append(base - penalty)
+                    labels.append(label)
+                    speakers.append(f"s{speaker:02d}")
+
+        return (
+            {name: np.array(values) for name, values in vectors.items()},
+            np.array(labels, dtype=np.int64),
+            speakers,
+        )
+
+    @staticmethod
+    def _duration_gap_difference(vectors, labels) -> float:
+        fixed = compute_cllr_min(vectors["fixed_short"], labels) - compute_cllr_min(
+            vectors["fixed_long"], labels
+        )
+        baseline = compute_cllr_min(vectors["baseline_short"], labels) - compute_cllr_min(
+            vectors["baseline_long"], labels
+        )
+        return fixed - baseline
+
+    def test_a_single_vector_statistic_reproduces_the_plain_bootstrap(self) -> None:
+        """The general form is the same estimator, not a second one."""
+        rng = np.random.default_rng(11)
+        speakers = [f"s{i:02d}" for i in range(6) for _ in range(20)]
+        labels = np.array([1, 0] * 60, dtype=np.int64)
+        scores = rng.standard_normal(120) + labels * 2.0
+
+        plain = bootstrap_over_speakers(
+            compute_cllr_min, scores, labels, speakers, n_resamples=200
+        )
+        general = bootstrap_contrast_over_speakers(
+            lambda vectors, resampled: compute_cllr_min(vectors["only"], resampled),
+            {"only": scores},
+            labels,
+            speakers,
+            n_resamples=200,
+        )
+        assert general.value == pytest.approx(plain.value)
+        assert general.lower == pytest.approx(plain.lower)
+        assert general.upper == pytest.approx(plain.upper)
+        assert general.p_value_vs_zero is None
+
+    def test_a_confound_shows_up_as_a_contrast_excluding_zero(self) -> None:
+        vectors, labels, speakers = self._four_vectors(short_penalty=0.5, confounded=0.6)
+        estimate = bootstrap_contrast_over_speakers(
+            self._duration_gap_difference,
+            vectors,
+            labels,
+            speakers,
+            n_resamples=300,
+            with_p_value=True,
+        )
+        # The fixed front-end's duration gap is smaller, so the contrast is
+        # negative, and it is separated from zero.
+        assert estimate.value < 0.0
+        assert estimate.upper < 0.0
+        assert estimate.p_value_vs_zero is not None
+        assert estimate.p_value_vs_zero < 0.05
+
+    def test_no_confound_leaves_the_contrast_covering_zero(self) -> None:
+        """The control: a duration effect the front-end change does not touch."""
+        vectors, labels, speakers = self._four_vectors(short_penalty=0.5, confounded=0.0)
+        estimate = bootstrap_contrast_over_speakers(
+            self._duration_gap_difference, vectors, labels, speakers, n_resamples=300
+        )
+        assert estimate.value == pytest.approx(0.0, abs=1e-12)
+        assert estimate.lower <= 0.0 <= estimate.upper
+
+    def test_vectors_of_different_lengths_are_refused(self) -> None:
+        vectors, labels, speakers = self._four_vectors(short_penalty=0.4, confounded=0.2)
+        vectors["fixed_short"] = vectors["fixed_short"][:-3]
+        with pytest.raises(InvalidEvidenceError, match="same trials"):
+            bootstrap_contrast_over_speakers(
+                self._duration_gap_difference, vectors, labels, speakers, n_resamples=60
+            )
+
+
 class TestSurvivorReconciliation:
     """Two models need not refuse the same recordings, and if each is scored on
     its own survivors the trial lists differ and the pairing breaks silently."""
@@ -556,6 +678,34 @@ class TestSurvivorReconciliation:
         ids = [r.recording_id for r, _ in keep_baseline]
         assert ids == sorted(ids)
         assert ids == [r.recording_id for r, _ in keep_variant]
+
+    def test_reconciliation_extends_across_durations(self) -> None:
+        """A contrast spanning durations needs the pairing to hold across them.
+
+        Refusal is duration-dependent — the front-end declines a recording with
+        under three seconds of net speech, and a 5 s truncation produces far
+        more of those than a 30 s one. Reconciling model against model at each
+        duration separately would leave the 30 s and 5 s figures computed over
+        different populations, and their difference would not be a duration
+        effect.
+        """
+        sets = {
+            "baseline@30": self._embedded(["0", "1", "2", "3"]),
+            "variant@30": self._embedded(["0", "1", "2", "3"]),
+            "baseline@5": self._embedded(["1", "2", "3"]),
+            "variant@5": self._embedded(["0", "2", "3"]),
+        }
+        aligned = restrict_to_common_survivors(sets)
+
+        assert set(aligned) == set(sets)
+        kept = [[r.recording_id for r, _ in embedded] for embedded in aligned.values()]
+        assert all(identifiers == kept[0] for identifiers in kept)
+        assert len(kept[0]) == 2
+        assert all(identifier.endswith(("2", "3")) for identifier in kept[0])
+
+    def test_reconciling_nothing_is_refused(self) -> None:
+        with pytest.raises(InsufficientDataError):
+            restrict_to_common_survivors({})
 
 
 class TestResultsRendering:
