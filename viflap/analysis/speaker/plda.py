@@ -451,8 +451,13 @@ def _observed_log_likelihood(
     and the tolerance means the same thing on 600 recordings as on 1,500.
     """
     dimension = centred.shape[1]
-    sign_within, log_det_within = np.linalg.slogdet(within)
-    sign_between, log_det_between = np.linalg.slogdet(between)
+    # The ridged matrices, because those are the ones the E-step inverted. See
+    # _ridged: scoring the unridged determinants against ridged inverses is
+    # scoring one model with another's sufficient statistics.
+    sign_within, log_det_within = np.linalg.slogdet(_ridged(within, config.regularisation))
+    sign_between, log_det_between = np.linalg.slogdet(
+        _ridged(between, config.regularisation)
+    )
     if sign_within <= 0 or sign_between <= 0:
         raise ConvergenceError(
             "a PLDA covariance stopped being positive definite during training",
@@ -578,10 +583,27 @@ def _stable_inverse(
     fails to stabilise a large-scale one, and which of those happens depends on
     the arbitrary scaling of the i-vectors.
     """
-    dimension = matrix.shape[0]
-    scale = max(np.trace(matrix) / dimension, 1e-12)
-    ridge = np.eye(dimension) * regularisation * scale
+    ridged = _ridged(matrix, regularisation)
     try:
-        return np.linalg.inv(_symmetrise(matrix) + ridge)
+        return np.asarray(np.linalg.inv(ridged), dtype=np.float64)
     except np.linalg.LinAlgError:
-        return np.linalg.pinv(_symmetrise(matrix) + ridge)
+        return np.asarray(np.linalg.pinv(ridged), dtype=np.float64)
+
+
+def _ridged(matrix: NDArray[np.float64], regularisation: float) -> NDArray[np.float64]:
+    """The symmetrised matrix the inverse is actually taken of.
+
+    Exposed rather than buried inside :func:`_stable_inverse` because the
+    likelihood has to be evaluated on the *same* matrix the E-step inverts. The
+    ridge makes the algorithm exact expectation-maximisation for the ridged
+    model and only approximate for the unridged one, so scoring the unridged
+    determinant against ridged inverses mixes two models — and the monotonicity
+    that EM guarantees then fails by a small amount that looks exactly like a
+    defect in the update equations. On this project's compact test
+    configuration it failed by 7 parts in 100,000, which is far too large to
+    dismiss as arithmetic and was entirely this mismatch.
+    """
+    dimension = matrix.shape[0]
+    scale = max(float(np.trace(matrix)) / dimension, 1e-12)
+    ridge = np.eye(dimension, dtype=np.float64) * (regularisation * scale)
+    return np.asarray(_symmetrise(matrix) + ridge, dtype=np.float64)

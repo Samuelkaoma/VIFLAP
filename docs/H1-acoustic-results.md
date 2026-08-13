@@ -1961,3 +1961,112 @@ dismiss, not easier.
 and the metric is computed over what remained, exactly as §6 describes. The
 refusal was identical under all three models, so it does not bias the contrast,
 but it still bounds what the absolute 5 s numbers mean.
+
+---
+
+## 18. The resampling units were not exchangeable, and it barely mattered
+
+Every interval in this document comes from a bootstrap over speakers, and §2
+states the reason: trials sharing a speaker are correlated, so the effective
+sample size is the speaker count rather than the trial count. That argument
+assumes speakers are exchangeable units. They were not.
+
+### One speaker owned three thousand trials and another owned none
+
+A different-source trial belongs to **two** speakers, and a cluster bootstrap
+needs it to belong to one. `build_trials` gave it to the first recording's
+speaker. That reads as arbitrary-but-harmless and is neither: `split_by_speaker`
+returns recordings grouped by speaker and sorted by identifier, and the trial
+loop pairs each recording with every *later* one. So the first speaker in the
+sort owns a trial against every later recording in the set, and the last speaker
+owns none at all.
+
+Counted exactly on the 102-speaker evaluation partition — 518 recordings,
+132,796 different-source trials:
+
+| Attribution | Heaviest owner | Lightest | Speakers owning nothing | Kish effective sample |
+|---|---:|---:|---:|---:|
+| first recording's speaker | 3,072 | 24 | **1 of 102** | **72.2** |
+| hashed unordered pair | 1,589 | 984 | 0 | **98.2** |
+
+The same measurement on the stored 42-speaker scores of §4 gives 1,314 against
+16, and a Kish effective sample of **31.1 of 42**.
+
+A bootstrap drawing units that differ hundredfold in influence is not drawing
+the units its interval claims. Whether the interval came out wide or narrow
+depended substantially on whether a handful of early-sorting speakers were in
+the resample.
+
+### The fix, and what it cannot be
+
+Nothing makes a two-speaker trial belong to one speaker correctly. What the
+attribution can be is *symmetric*: the owner is now chosen by a SHA-256 of the
+two recording identifiers taken as an **unordered** pair, so it does not depend
+on which side of the comparison a recording fell on, and each speaker pair's
+trials split roughly evenly between them. `hashlib` rather than the built-in
+`hash`, which is salted per interpreter and would silently re-attribute every
+trial on every run — changing the interval while leaving the point estimate
+alone, which is the worst combination for anyone trying to reproduce a figure.
+
+Kish effective sample size is now computed per cell and recorded in every
+report, so the assumption is visible in the artefact instead of being an
+argument in a docstring.
+
+### Result: no verdict moves, and the widths move by under five percent
+
+The six pooled cells of §9, rerun with nothing changed but the attribution:
+
+| Cell | `C_llr_min` | Interval, first-recording rule | Interval, symmetric rule | Width |
+|---|---:|---|---|---:|
+| clean, 30 s | 0.2757 | [0.2150, 0.3883] | [0.2125, 0.3830] | −1.6% |
+| clean, 15 s | 0.3493 | [0.2884, 0.4550] | [0.2884, 0.4478] | −4.4% |
+| clean, 5 s | 0.5385 | [0.4833, 0.6180] | [0.4790, 0.6133] | −0.3% |
+| babble 20 dB, 30 s | 0.2947 | [0.2307, 0.4002] | [0.2340, 0.4002] | −1.9% |
+| babble 20 dB, 15 s | 0.3705 | [0.3105, 0.4662] | [0.3127, 0.4664] | −1.3% |
+| babble 20 dB, 5 s | 0.5137 | [0.4661, 0.5937] | [0.4675, 0.6010] | **+4.6%** |
+
+**Every point estimate and every EER is identical to twelve decimal places.**
+That is by construction — ownership enters the resampling and nothing else — and
+it is checked rather than asserted, because a change that moved a point estimate
+would mean the attribution had reached somewhere it has no business being.
+
+**No cell changes verdict.** All six were inconclusive and all six remain so.
+
+**The effect is small and not uniformly in one direction.** Five cells narrow
+and one widens. Restoring exchangeability is not the same as adding information:
+it re-weights which speakers drive the replicate distribution, and where a
+dominant speaker happened to be a stabilising one, removing that dominance
+widens the interval instead.
+
+### Recorded because the finding is a negative one
+
+This was a real defect. The units a stated interval rests on were not the units
+it claimed, one speaker in the evaluation set contributed nothing to the
+resampling at all, and the effective sample was three quarters of the nominal
+count. It is exactly the kind of thing that, found in someone else's method
+section, would justify discounting their intervals.
+
+And correcting it moved nothing that matters. The intervals shift by less than
+0.008 in either bound and no verdict changes, which is consistent with the one
+other measurement available here: a two-sided dyadic bootstrap, which handles
+the second speaker properly rather than by attribution, was measured to move the
+interval by about 0.004.
+
+Both halves are worth stating. §§14 and 15 record corrections that changed
+conclusions; this one records a correction that did not, and reporting only the
+first kind would misrepresent how often careful checks come back negative. The
+defect is fixed regardless — a design that happens not to bite is still a design
+that should not be relied on to keep not biting as the corpus changes.
+
+### What this does not fix
+
+**The trial is still attributed rather than shared.** Weighting a trial one half
+to each speaker, or re-forming trials among the drawn speakers, are the
+principled treatments; the measurement above suggests neither would move a
+reported figure here, which is why neither was built.
+
+**The intervals elsewhere in this document predate it.** §§4–17 are the
+first-recording attribution throughout. On the evidence of the table above they
+are within about five percent of their corrected widths, and no verdict in the
+document turns on a margin that small — but they have not each been rerun, and
+the ones quoted above are the only ones measured both ways.
