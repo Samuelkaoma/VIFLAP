@@ -92,6 +92,61 @@ assessed by resampling every edge from its own interval.
 
 ---
 
+## What has been measured
+
+One hypothesis has been tested on real speech. **H1** asks whether enough
+speaker-discriminative information survives a narrowband telephony channel for
+the acoustic stream to be worth including at all, and it was given its decision
+rule before any data existed: supported if the *upper* bound of `C_llr_min`
+reaches 0.30, falsified if the *lower* bound clears 0.50, inconclusive if the
+interval spans both. The decision is made on the interval, never the point
+estimate.
+
+The current system trains on 306 LibriSpeech speakers and is evaluated on 102
+held out from both it and the calibration set, through the parametric channel
+model.
+
+| | |
+|---|---|
+| Best cell — 12.2 kbit/s, clean, 30 s | `C_llr_min` **0.276** [0.215, 0.388], EER **7.89%** |
+| 30-cell sweep, bias-corrected intervals | **0 supported, 6 falsified, 24 inconclusive** |
+| Where the falsifications are | all six at 5 s — nothing at 15 s or 30 s is decided either way |
+
+Four things that cost an experiment each:
+
+**Capacity was never the constraint; the corpus was.** Doubling the model on the
+same 125 speakers made all six tested cells significantly worse. Retraining the
+*same* configuration on 306 speakers improved five of six, four of them surviving
+Holm-Bonferroni. The between-speaker scatter of *S* speakers has rank *S* − 1, so
+the training speaker count caps the discriminative subspace whatever the model
+size — and the published system this is benchmarked against trained its extractor
+on roughly 6,000 speakers.
+
+**The countermeasure is structurally blind to one of its four attacks.** LFCCs
+are computed from the magnitude spectrum, and phase randomisation preserves
+magnitude spectra almost exactly. Twenty-five times the training speakers moved
+that family from 50.00% to 52.60% EER, which is to say not at all. It needs a
+phase-sensitive feature, not more data.
+
+**A safeguard was being reported as a result.** Matched calibration looked cheap
+at 0.054 bits — measured after the ELUB clip, which replaces the reported
+likelihood ratio with a bound for 60.6% of trials. Before the clip it costs 0.26
+bits, the same order as the discrimination floor. That conclusion is withdrawn in
+place rather than deleted.
+
+**The largest effect was checked for a confound and survived it.** The cepstral
+normalisation window is fixed at 300 frames, which is 11% of a 30 s recording and
+67% of a 5 s one — so the duration sweep varied the front-end alongside the
+duration. Retrained with the window held duration-invariant, 94% of the 30 s → 5 s
+gap remains and the contrast does not exclude zero.
+
+The full write-up is in
+[`docs/H1-acoustic-results.md`](docs/H1-acoustic-results.md), including a section
+on everything these numbers do **not** establish and, where a conclusion has been
+withdrawn, the wrong version with the reason it was wrong.
+
+---
+
 ## Architecture
 
 Five layers, dependencies pointing inward only. The rule is enforced by parsing
@@ -172,7 +227,7 @@ Run the tests:
 python -m pytest
 ```
 
-348 tests: unit, property-based (hypothesis), integration, API contract, and
+563 tests: unit, property-based (hypothesis), integration, API contract, and
 architecture. The architecture tests fail the build on a layering violation or on
 identity vocabulary reaching emittable text.
 
@@ -180,9 +235,35 @@ Train the acoustic stack on real speech and run the H1 degradation sweep:
 
 ```bash
 pip install -e ".[api,experiments,dev]"
-python -m scripts.fetch_corpus            # streams LibriSpeech, keeps a bounded subset
-python -m scripts.train_acoustic          # speaker-disjoint, multi-condition
-python -m scripts.evaluate_h1             # the sweep, with speaker-level intervals
+# Stream a bounded subset of each partition; neither archive is kept.
+python -m scripts.fetch_corpus
+python -m scripts.fetch_corpus \
+    --url https://www.openslr.org/resources/12/train-clean-360.tar.gz \
+    --destination data/corpus/librispeech-360
+
+python -m scripts.train_acoustic \
+    --corpus data/corpus/librispeech --corpus data/corpus/librispeech-360 \
+    --output models/acoustic_pooled.npz
+
+python -m scripts.evaluate_h1 \
+    --corpus data/corpus/librispeech --corpus data/corpus/librispeech-360 \
+    --model models/acoustic_pooled.npz
+```
+
+**Pass every corpus root the model was trained on.** `--corpus` defaults to a
+single partition, and a pooled model evaluated against one of them gets a split
+that is internally disjoint, passes every check, and scores the model on speakers
+it memorised. That has produced a spuriously good number here more than once.
+Models now record their own training speakers so the check can be made against
+what was actually trained on rather than against the split that happens to be in
+hand.
+
+Two paired comparisons answer questions the sweep cannot, by scoring two models
+on identical trials so that the between-speaker variation cancels:
+
+```bash
+python -m scripts.compare_capacity --baseline models/acoustic.npz --variant models/acoustic_large.npz
+python -m scripts.compare_cmvn --baseline models/acoustic_pooled.npz --variant models/acoustic_pooled_cmvn_utt.npz
 ```
 
 Results are in [`docs/H1-acoustic-results.md`](docs/H1-acoustic-results.md).
@@ -217,19 +298,34 @@ The investigator interface is in [`frontend/`](frontend/README.md).
 
 ## What this software is not
 
-It is not a finding about telephony fraud. The acoustic stack has now been
-trained and evaluated on real speech — 251 LibriSpeech speakers, speaker-disjoint
-throughout, reported in [`docs/H1-acoustic-results.md`](docs/H1-acoustic-results.md)
-— and that is a genuine empirical result about *this system under simulated
+It is not a finding about telephony fraud. The acoustic stack has been trained
+and evaluated on real speech — 510 usable LibriSpeech speakers across two
+partitions, 306 of them training the current model, speaker-disjoint throughout —
+and that is a genuine empirical result about *this system under simulated
 narrowband degradation*. It is not a result about the target population. The
 speech is read English recorded on good microphones; the target is
-Bantu-language conversational telephony from callers attempting deception. The
-channel is the parametric CELP model rather than a real AMR-NB coder, because
-ffmpeg with `libopencore-amrnb` was unavailable, and results obtained through the
-two must never be pooled.
+Bantu-language conversational telephony from callers attempting deception.
+
+**The channel has never been validated, and it is harsher than the thing it
+models.** ffmpeg with `libopencore-amrnb` was unavailable, so every figure comes
+through the parametric CELP model. Measured against a matched-bandwidth
+reference it introduces 6.6 dB of log-spectral distortion where the standards
+literature designs for around 1 dB, and the nominal bitrate moves only 0.33 dB
+of that — the labels "12.2 kbit/s" and "4.75 kbit/s" set an LSF quantiser step
+and a pulse count, and no part of the implementation computes a bit budget.
+Results obtained through this model and through a real coder must never be
+pooled. Paired comparisons between two models are the robust part, since both
+arms share the channel and it cancels in the difference.
 
 Nothing about the other four evidence streams has been measured. H2, H3, H5 and
 H7 remain untested, and no figure in this repository bears on them.
+
+The corpus position for the target population is worse than the hour counts
+suggest: roughly 390 hours of Zambian audio are available to the unsupervised
+stages, which need no labels, against **twelve speakers** with recoverable
+identity and more than one session — the quantity that actually determines
+discrimination. BIG-C's `speaker_id` is a conversation-local participant index
+rather than a person, and 37 of its 74 values carry both genders.
 
 It is not a deployment. Production infrastructure, federation, real-time
 operation and high availability are out of scope and stated as such in §12 of the
