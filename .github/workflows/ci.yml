@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[api,dev]"
+
+      # Run first and separately. A layering violation or identity vocabulary in
+      # emittable text is an architectural regression, and reporting it among a
+      # hundred other results buries it.
+      - name: Architecture constraints
+        run: python -m pytest tests/architecture -q
+
+      - name: Tests
+        run: python -m pytest -q
+
+      # scripts/ is included: the test suite imports it, so a break there fails
+      # the build anyway, and it is the code the reported numbers came out of.
+      - name: Lint
+        run: ruff check viflap tests scripts
+
+      - name: Format
+        run: ruff format --check viflap tests scripts
+
+      - name: Types
+        run: mypy viflap
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Types
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      # Includes the output-policy tests: a label reading "Find matches" fails here.
+      - name: Tests
+        run: npm test
+      - name: Build
+        run: npm run build

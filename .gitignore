@@ -1,0 +1,30 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+.pytest_cache/
+.hypothesis/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+node_modules/
+frontend/dist/
+
+# Never commit evidence, models trained on it, or an audit log. The audit log in
+# particular is a record of who looked at whose evidence.
+data/
+models/
+*.jsonl
+*.npz
+*.wav
+*.amr
+
+.DS_Store
+.idea/
+.vscode/

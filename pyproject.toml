@@ -1,0 +1,208 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "viflap"
+version = "1.0.0"
+description = "Calibrated multi-evidence case linkage for telephony-enabled fraud"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "VIFLAP Research" }]
+keywords = [
+    "forensic-science",
+    "likelihood-ratio",
+    "speaker-comparison",
+    "evidence-fusion",
+    "calibration",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+
+# The core runtime needs only numpy and scipy. Every model in the system —
+# the GMM-UBM, the i-vector extractor, PLDA, the countermeasure, calibration,
+# fusion — is implemented against them. Deep learning frameworks are optional
+# and belong to the `neural` extra: the system is fully functional without one,
+# which matters for deployment in an environment that cannot install a
+# multi-gigabyte dependency.
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.11",
+]
+
+[project.optional-dependencies]
+api = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "pydantic>=2.6",
+]
+persistence = [
+    "sqlalchemy>=2.0",
+]
+plots = [
+    "matplotlib>=3.7",
+]
+neural = [
+    # Optional acceleration and an alternative embedding front-end. The
+    # i-vector/PLDA stack remains the default and the reference implementation;
+    # anything added here is compared against it rather than replacing it.
+    "torch>=2.1",
+    "torchaudio>=2.1",
+    "speechbrain>=1.0",
+]
+experiments = [
+    # Corpus audio decoding for the training and evaluation scripts under
+    # scripts/. Deliberately not a core dependency: the library reads signals as
+    # arrays and has no opinion about what file they came out of, and a
+    # deployment that receives audio over the API needs no decoder for FLAC.
+    "soundfile>=0.12",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.1",
+    "hypothesis>=6.98",
+    "httpx>=0.27",
+    "ruff>=0.4",
+    "mypy>=1.9",
+    # The harness tests import scripts/, which decodes corpus audio.
+    "soundfile>=0.12",
+]
+all = ["viflap[api,persistence,plots,experiments,dev]"]
+
+[project.scripts]
+viflap = "viflap.interfaces.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["viflap*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-q",
+    "--strict-markers",
+    "--strict-config",
+    "--tb=short",
+]
+markers = [
+    "slow: exercises a full model training run",
+]
+filterwarnings = [
+    "error",
+    # Hypothesis reports slow examples on the property suite; that is
+    # information, not a defect.
+    "ignore::UserWarning:hypothesis",
+]
+
+[tool.coverage.run]
+source = ["viflap"]
+branch = true
+omit = ["viflap/analysis/calibration/plots.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "\\.\\.\\.",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 92
+src = ["viflap", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",      # pycodestyle
+    "F",           # pyflakes
+    "I",           # import sorting
+    "N",           # naming
+    "UP",          # pyupgrade
+    "B",           # bugbear
+    "C4",          # comprehensions
+    "SIM",         # simplify
+    "RUF",         # ruff-specific
+    "ARG",         # unused arguments
+    "PTH",         # prefer pathlib
+    "RET",         # return consistency
+]
+ignore = [
+    # Long lines occur in explanatory comments where breaking them would harm
+    # readability more than the length does.
+    "E501",
+    # Boolean positional arguments are used in a few frozen value objects where
+    # a keyword would be noise.
+    "FBT",
+    # `int(np.argmax(...))` and similar are deliberate conversions from a numpy
+    # integer to a Python one. They are not redundant: a numpy integer leaking
+    # into a dataclass field or a JSON payload changes its serialised type, and
+    # in an audit record that means the canonical form differs between a value
+    # that came from an array and one that came from a literal — which breaks
+    # hash verification for reasons having nothing to do with tampering.
+    "RUF046",
+    # Domain exceptions are named for what they are in the vocabulary of the
+    # field — GovernanceViolation, OutputConstraintViolation — rather than with
+    # an Error suffix. The names appear in operator-facing messages and in the
+    # audit trail, and "violation" is the word a governance review would use.
+    "N818",
+    # Protocol methods necessarily take parameters they do not use; the
+    # signature is the contract.
+    "ARG002",
+    # Frozen configuration objects hold other frozen configuration objects as
+    # defaults. The rule guards against shared mutable state, which cannot arise
+    # here: every one of these is a frozen dataclass, so a shared instance is
+    # indistinguishable from a copy.
+    "RUF009",
+    # `itertools.pairwise` is clearer for successive pairs but does not accept
+    # the `strict` argument, and the explicit `zip(x, x[1:], strict=False)` form
+    # states that the offset pairing is deliberate.
+    "RUF007",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests deliberately reach into private helpers to assert behaviour that has no
+# public surface, and use assert statements throughout.
+"tests/**" = ["ARG", "SIM", "N802", "N806", "B905"]
+# FastAPI exception handlers must accept the request whether or not they use it;
+# the framework calls them with it.
+"viflap/interfaces/api/app.py" = ["ARG001"]
+# The domain's re-export list is grouped by module so a reader can see what each
+# contributes, which is more useful than alphabetical order.
+"viflap/domain/__init__.py" = ["RUF022"]
+# The tokeniser pattern contains a typographic apostrophe deliberately:
+# transcripts contain both forms and a contraction split in half becomes a
+# spurious high-frequency fragment in every function-word profile.
+"viflap/analysis/behaviour/text.py" = ["RUF001"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["scripts", "viflap"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+warn_return_any = true
+disallow_untyped_defs = true
+disallow_any_generics = true
+no_implicit_reexport = true
+plugins = []
+
+[[tool.mypy.overrides]]
+module = ["scipy.*", "matplotlib.*", "hypothesis.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Tests exercise deliberately invalid inputs to assert that they are refused,
+# which requires passing types the signatures reject.
+module = "tests.*"
+disallow_untyped_defs = false

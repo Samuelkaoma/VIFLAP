@@ -1,0 +1,48 @@
+# Development composition.
+#
+# Not a deployment topology. A real deployment needs an authenticating reverse
+# proxy in front of the API — the service performs no authentication of its own —
+# and audit log storage the operating agency cannot write to, which is a custody
+# arrangement rather than a container.
+
+services:
+  api:
+    build:
+      context: .
+      target: runtime
+    # Loopback only. The API returns evidence about identified individuals, and a
+    # development service on 0.0.0.0 is a disclosure waiting for someone to be on
+    # the same network.
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - viflap-data:/var/lib/viflap
+    environment:
+      VIFLAP_AUDIT_LOG: /var/lib/viflap/audit/audit.jsonl
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      VITE_VIFLAP_API: http://127.0.0.1:8000
+    depends_on:
+      - api
+
+volumes:
+  # Named volume, so the audit log survives a container rebuild. An audit log
+  # destroyed by a redeploy is indistinguishable from one destroyed on purpose.
+  viflap-data:
