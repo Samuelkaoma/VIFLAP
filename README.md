@@ -227,7 +227,7 @@ Run the tests:
 python -m pytest
 ```
 
-563 tests: unit, property-based (hypothesis), integration, API contract, and
+575 tests: unit, property-based (hypothesis), integration, API contract, and
 architecture. The architecture tests fail the build on a layering violation or on
 identity vocabulary reaching emittable text.
 

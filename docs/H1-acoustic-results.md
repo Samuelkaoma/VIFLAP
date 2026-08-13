@@ -2070,3 +2070,97 @@ first-recording attribution throughout. On the evidence of the table above they
 are within about five percent of their corrected widths, and no verdict in the
 document turns on a margin that small — but they have not each been rerun, and
 the ones quoted above are the only ones measured both ways.
+
+---
+
+## 19. What the PLDA trainer was watching was not a likelihood
+
+Every model in this document was trained by expectation-maximisation to a
+stopping rule, and the quantity that rule read was not one EM is guaranteed to
+improve.
+
+### The quantity
+
+The trainer accumulated the quadratic data term and nothing else:
+
+```
+log_likelihood += -0.5 * sum(residuals @ within_inverse * residuals)
+```
+
+No `log|W|`, no `log|B|`, no latent prior, no posterior-covariance trace. That is
+neither the observed-data log-likelihood nor the evidence lower bound. It is a
+piece of both, and nothing makes a piece of a monotone quantity monotone, so the
+run halted wherever this happened to settle. Worse than the arbitrary stopping
+point: the standard sanity check on an EM implementation — *does the likelihood
+climb* — was unavailable, and it is the check that separates a correct M-step
+from a plausible wrong one.
+
+**The M-step itself is correct**, which is worth saying because it is the part
+usually got wrong. The `Cov_s` term is present in the `W` update. Omitting it
+treats each speaker's estimated position as if it were known exactly, inflating
+`W`, deflating `B`, and understating the evidential value of a genuine
+same-source pair.
+
+### The marginal is exact and costs almost nothing
+
+For a speaker with `n_s` recordings the observations are jointly Gaussian with
+covariance `I ⊗ W + 11ᵀ ⊗ B`, and the determinant lemma with Woodbury reduces
+both halves to quantities the E-step already forms:
+
+```
+log|Σ_s|   = n_s log|W| + log|B| - log|Cov_s|
+xᵀ Σ_s⁻¹ x = Σᵢ xᵢᵀ W⁻¹ xᵢ - (Σᵢ xᵢ)ᵀ W⁻¹ Cov_s W⁻¹ (Σᵢ xᵢ)
+```
+
+so the exact marginal costs one extra determinant per *distinct recording
+count*, not per speaker, and the posterior-covariance cache that already existed
+serves both. A decrease now raises `ConvergenceError` rather than being logged,
+and `n_iterations`, the final likelihood and whether the tolerance was actually
+met are recorded on the model and reach `describe()`.
+
+### The guard was checked against the defect it exists to catch
+
+Asserting monotonicity is worth nothing if the assertion cannot fail. Dropping
+the `Cov_s` term from the `W` update — the usual mistake — and tracking the same
+likelihood:
+
+| M-step | Smallest step in log-likelihood per recording |
+|---|---:|
+| as implemented | −0.000000 (monotone) |
+| `Cov_s` dropped | **−0.139** |
+
+Against a tolerance of 1e-6 relative, so the guard catches it by five orders of
+magnitude.
+
+### And then the guard fired on correct code
+
+It failed immediately on the compact test configuration, by seven parts in a
+hundred thousand — far too large to dismiss as floating point, and the first
+reading was that the M-step had a defect after all.
+
+It did not. `_stable_inverse` adds a trace-proportional ridge before inverting,
+so the algorithm is exact EM for the **ridged** model and only approximate for
+the unridged one, while the new likelihood was taking `log|B|` and `log|W|` of
+the *unridged* matrices. Scoring one model with another model's sufficient
+statistics carries no monotonicity guarantee and duly had none. The ridge is now
+a named function both sides use.
+
+This is recorded because the failure mode is instructive in both directions: a
+correct check found a real inconsistency that had been invisible while nothing
+was checking, and the inconsistency was in the *checking*, not in the thing
+checked. Had the tolerance been set loosely enough to absorb it, both the
+mismatch and any future genuine defect would have passed.
+
+### What this does and does not change
+
+**No result in this document changes.** The models on disk are unchanged files
+and their scores are what they were.
+
+**A retrain would not reproduce them exactly.** The stopping rule now reads a
+different quantity, so a run may halt at a different iteration and produce a
+different `model_id`. Any comparison against a figure here must be against the
+stored archive rather than against a fresh training run — which is what the
+content-derived model id is for.
+
+**The iteration counts of the models in §§4–17 are unknown.** They were not
+recorded. Models trained from here on carry them.
