@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from typing import ClassVar
 
 import numpy as np
 import pytest
@@ -241,15 +242,28 @@ class TestCepstralNormalisationWindow:
     These pin both halves of that behaviour and the setting that removes it.
     """
 
+    #: Speech frames a 30 s, 15 s and 5 s recording actually yields through
+    #: `amr12.2_clean`, measured on evaluation material rather than assumed.
+    FRAMES_BY_DURATION: ClassVar[dict[int, int]] = {30: 2646, 15: 1324, 5: 446}
+
     @pytest.fixture
     def features(self, rng) -> np.ndarray:
         # A slow drift plus noise: without the drift a local and a global mean
-        # coincide and the distinction under test would be invisible.
-        frames = np.arange(2400)[:, None] / 2400.0
-        return frames * np.array([3.0, -2.0, 1.0]) + rng.standard_normal((2400, 3))
+        # coincide and the distinction under test would be invisible. The drift
+        # dominates the noise so the comparison below is not a measurement of
+        # whichever seed the fixture happened to draw.
+        n = self.FRAMES_BY_DURATION[30]
+        frames = np.arange(n)[:, None] / n
+        return frames * np.array([9.0, -6.0, 3.0]) + rng.standard_normal((n, 3))
+
+    @staticmethod
+    def _distance_from_utterance_level(span: np.ndarray, window: int) -> float:
+        windowed = sliding_cmvn(span, window, normalise_variance=True)
+        utterance = cepstral_mean_variance_normalise(span, normalise_variance=True)
+        return float(np.sqrt(np.mean((windowed - utterance) ** 2)))
 
     def test_non_positive_window_is_utterance_level_at_any_length(self, features) -> None:
-        for n_frames in (350, 2400):
+        for n_frames in (446, 2646):
             span = features[:n_frames]
             assert np.allclose(
                 sliding_cmvn(span, 0, normalise_variance=True),
@@ -261,22 +275,37 @@ class TestCepstralNormalisationWindow:
             )
 
     def test_a_fixed_window_changes_character_with_duration(self, features) -> None:
-        """The confound itself: 300 frames is global at 5 s and local at 30 s."""
-        short = features[:280]
-        long = features[:2400]
-        utterance = lambda x: cepstral_mean_variance_normalise(  # noqa: E731
-            x, normalise_variance=True
-        )
+        """The confound itself, as a monotone approach to the utterance mean.
 
+        The default 300 frames covers 11% of a 30 s recording and 67% of a 5 s
+        one, so it is a local estimate at the long end and nearly a global one
+        at the short end. Shortening the recording therefore changes what the
+        front-end does, not only how much speech it does it to — which is what
+        makes the duration axis of the sweep two factors rather than one.
+        """
+        distances = [
+            self._distance_from_utterance_level(features[:n_frames], 300)
+            for n_frames in (
+                self.FRAMES_BY_DURATION[5],
+                self.FRAMES_BY_DURATION[15],
+                self.FRAMES_BY_DURATION[30],
+            )
+        ]
+        assert distances[0] < distances[1] < distances[2]
+        # Not a marginal difference: at 5 s the operation sits far nearer
+        # utterance level than at 30 s.
+        assert distances[0] < 0.6 * distances[2]
+
+    def test_a_window_longer_than_the_recording_is_exactly_global(self, features) -> None:
+        """The limit of the same behaviour, where it stops being a matter of degree."""
+        span = features[:280]
         assert np.allclose(
-            sliding_cmvn(short, 300, normalise_variance=True), utterance(short)
-        )
-        assert not np.allclose(
-            sliding_cmvn(long, 300, normalise_variance=True), utterance(long)
+            sliding_cmvn(span, 300, normalise_variance=True),
+            cepstral_mean_variance_normalise(span, normalise_variance=True),
         )
 
     def test_a_short_window_stays_local_at_both_durations(self, features) -> None:
-        for n_frames in (350, 2400):
+        for n_frames in (446, 2646):
             span = features[:n_frames]
             windowed = sliding_cmvn(span, 100, normalise_variance=True)
             assert not np.allclose(

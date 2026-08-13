@@ -5,9 +5,9 @@ The largest effect in the H1 sweep is duration: ``C_llr_min`` rises by roughly
 front-end rather than in the channel.
 
 Cepstral mean and variance normalisation runs over a *fixed* window of 300
-frames. At 30 s a recording carries some 2,300 speech frames, so the window
-spans about 8% of it and the normalisation is genuinely local. At 5 s it carries
-some 350, the window spans about 85%, and the operation collapses into
+frames. At 30 s a recording carries around 2,650 speech frames, so the window
+covers 11% of it and the normalisation is genuinely local. At 5 s it carries
+around 450, the window covers 67%, and the operation is most of the way to
 utterance-level normalisation — which subtracts a mean and divides by a standard
 deviation estimated over the whole utterance, removing between-speaker variance
 along with the channel it was meant to remove.

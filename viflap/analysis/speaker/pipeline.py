@@ -91,10 +91,12 @@ class FrontEndConfig:
 
     Three hundred frames is three seconds, chosen to track AMR rate adaptation
     within a call. It is a *fixed* window, so its character changes with the
-    length of what it is given: over a 30 s recording (~2,300 speech frames) it
-    is a local estimate spanning some 8% of the utterance, and over a 5 s
-    recording (~350 frames) it spans some 85% and is very nearly the utterance
-    mean. A duration sweep at a fixed window therefore varies the front-end
+    length of what it is given. Measured through this project's channel, a 30 s
+    recording yields around 2,650 speech frames and the window covers 11% of
+    them; a 5 s recording yields around 450 and the window covers 67%, which is
+    most of the utterance at once.
+
+    A duration sweep at a fixed window therefore varies the front-end
     alongside the duration, and the two effects cannot be separated after the
     fact. Setting this to zero, or to a window short enough to stay local at
     every duration, makes the front-end duration-invariant and is what the

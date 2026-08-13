@@ -43,6 +43,7 @@ rather than assumed.
 |---|---:|
 | UBM components | 128 |
 | Feature dimension | 60 (19 MFCC + energy, Δ, ΔΔ) |
+| Cepstral normalisation window | 300 frames (3 s), sliding — see §17 |
 | i-vector rank | 100 |
 | PLDA dimension | 100 |
 | Training frames (total) | 1,440,290 |
@@ -205,6 +206,13 @@ evaluation speakers is not enough resampling base to do so.
 | Noise level | clean → babble 5 dB (30 s) | +0.06 |
 | Bitrate | 12.2 → 4.75 kbit/s (30 s) | +0.001 |
 | Bitrate | 12.2 → 4.75 kbit/s (5 s) | +0.020 |
+
+> **Checked for a front-end confound in §17, and it survives.** The cepstral
+> normalisation window is fixed at 300 frames, which is 11% of a 30-second
+> recording and 67% of a five-second one — so shortening the recording changes
+> what the front-end does as well as how much speech it does it to. Retrained
+> with the window held duration-invariant, **94% of the 30 s → 5 s gap remains**
+> and the contrast does not exclude zero. The row below is a duration effect.
 
 Bitrate costs almost nothing at 30 seconds and roughly twenty times more at 5.
 The factors interact rather than adding: with enough frames the i-vector averages
@@ -1786,3 +1794,142 @@ Until that exists, the honest scope of every absolute figure in this document is
 "through this parametric model", and the conditions should be labelled by what
 they actually vary — LSF step and pulse count — rather than by bitrates that no
 part of the implementation computes.
+
+---
+
+## 17. The duration effect is not an artefact of the normalisation window
+
+Duration is the largest effect in this document — §5 reports +0.23 in
+`C_llr_min` from 30 s to 5 s, and every later section treats it as the factor
+that matters. It was confounded, and the confound sat in the front-end rather
+than in the channel.
+
+### The confound
+
+`FrontEndConfig.sliding_cmvn_frames` is 300, three seconds of frames, and it is
+a **fixed** window. What that window does depends on what it is given:
+
+Measured on eight evaluation recordings through `amr12.2_clean`, which is what
+the sweep actually feeds it:
+
+| Duration | Speech frames (median, range) | Window as a share | What the operation is |
+|---:|---:|---:|---|
+| 30 s | 2,646 (2,496–2,841) | **11%** | a local estimate, tracking within-recording change |
+| 15 s | 1,324 (1,231–1,405) | **23%** | still local |
+| 5 s | 446 (349–454) | **67%** | most of the utterance at once |
+
+At five seconds the sliding window has largely collapsed into utterance-level
+normalisation — and utterance-level *variance* normalisation divides every
+cepstral dimension by a deviation estimated over the whole recording, which
+removes between-speaker variance along with the channel variance it is aimed at.
+
+So the duration sweep varied two things at once. It removed speech, **and** it
+changed what the front-end did to what was left. Nothing in the reported numbers
+separates them, and the front-end change pushes in the same direction as the
+duration change, so the effect could in principle have been substantially
+front-end rather than duration.
+
+### The control, and why it had to be retrained
+
+The window travels inside the model archive, because it is part of the front-end
+the model was fitted to. Evaluating an existing model under a different window
+would therefore measure a train/test mismatch and not the window. Two control
+models were trained instead, on the **same 306 speakers, the same split, the
+same seed and the same channel conditions** as `acoustic_pooled.npz`, differing
+in nothing but the window:
+
+| Model | Window | What it does at every duration |
+|---|---|---|
+| `ivec-plda-d5023efe82508a33` | 300 frames | local at 30 s, global at 5 s — the confounded baseline |
+| `ivec-plda-b2db0f6fcf6fbd4b` | utterance | **global** at every duration |
+| `ivec-plda-ea5b74e0e2b1cbdd` | 100 frames | **local** at every duration |
+
+The two controls bracket the baseline rather than merely replacing it. One holds
+the operation global everywhere, the other holds it local everywhere; neither
+changes character with duration, and the baseline is the only arm that does.
+
+### What is compared
+
+`scripts/compare_cmvn.py`, at 12.2 kbit/s clean, on the pooled model's own 102
+held-out speakers. The quantity that answers the question is a difference of two
+differences — the 30 s→5 s gap under the control set against the same gap under
+the baseline — so it needs a bootstrap that neither the plain nor the paired
+version can express. `bootstrap_contrast_over_speakers` supplies it, and the two
+existing functions are now wrappers over it so the BCa interval and its p-value
+still cannot drift apart.
+
+The trial list has to be common across **durations** as well as across models.
+The front-end refused 12 of 518 recordings at 5 s — identically under both
+models — and had those 12 been kept at 30 s the two ends of the gap would have
+been computed over different populations. Everything below is therefore on the
+506 recordings every model embedded at every duration, which is why the 30 s
+baseline reads 0.274 here against 0.276 in §9.
+
+### Result: 94% of the duration effect survives
+
+Utterance-level control against the baseline. Negative means the control
+discriminates better.
+
+| Duration | 300 frames | utterance | Paired difference [95% CI] | p |
+|---:|---:|---:|---|---:|
+| 30 s | 0.274 | 0.266 | −0.007 [−0.017, +0.004] | 0.205 |
+| 15 s | 0.351 | 0.331 | −0.020 [−0.034, −0.005] | 0.007 |
+| 5 s | 0.539 | 0.514 | −0.024 [−0.041, −0.008] | 0.002 |
+
+And the duration gaps themselves, which is the question:
+
+| Gap | 300 frames | utterance | Contrast [95% CI] | p | Surviving |
+|---|---:|---:|---|---:|---:|
+| 30 s → 15 s | +0.077 [+0.059, +0.109] | +0.065 [+0.045, +0.089] | −0.013 [−0.028, +0.002] | 0.080 | **84%** |
+| 30 s → 5 s | +0.265 [+0.215, +0.309] | +0.248 [+0.195, +0.295] | −0.017 [−0.037, +0.001] | 0.079 | **94%** |
+
+**The confound is real in direction and small in size.** Holding the front-end
+duration-invariant shrinks the 30 s→5 s gap by 0.017 of 0.265 — six percent —
+and the contrast does not exclude zero at either duration, before or after
+Holm-Bonferroni over the two.
+
+§5's headline therefore stands, and stands on firmer ground than it did: the
+duration effect is duration, not the normalisation window changing behaviour
+underneath it. That was the outcome hoped for when the check was proposed, which
+is a reason to state the arithmetic rather than the conclusion — 0.248 of 0.265,
+with an interval that includes no change at all.
+
+### A second finding, which was not the one being looked for
+
+The control is **better at every duration**, and significantly so at two of the
+three. EER falls from 7.86% to 7.62% at 30 s and from 16.87% to 15.72% at 5 s.
+The sliding window is not merely neutral here; it is costing something.
+
+The mechanism is in the docstring that justifies it. The window is 300 frames
+because *"AMR rate adaptation changes the effective channel within a single call
+as radio conditions vary, so the utterance-level mean is an average over
+conditions rather than an estimate of one"*. That is sound reasoning about real
+telephony — and this channel does not do it. `DegradationCondition` carries one
+`bitrate_kbps`, `apply_condition` codes the whole recording at it, and nothing
+anywhere varies the rate within a recording. The sliding window is paying the
+cost of a noisier estimate from fewer frames for a benefit the degradation model
+cannot deliver.
+
+That scopes the finding rather than settling it. On real AMR with rate
+adaptation the sliding window may well earn its keep, and §16's unvalidated
+channel is the reason this cannot be decided here. What can be said is narrower
+and still worth saying: **through this channel the sliding window is a small net
+loss, and the baseline model in §§4–15 is very slightly worse than it needed to
+be.** The effect is a few thousandths of `C_llr_min` at 30 s and nothing in this
+document turns on it.
+
+### What this does not establish
+
+**It is one condition.** 12.2 kbit/s clean. Whether the window interacts with
+added noise — where the local estimate has more to track — is untested, and the
+noise cells are where a sliding window would most plausibly pay.
+
+**Both controls are still fixed windows.** Neither adapts to the material. The
+comparison rules out the specific artefact of a window that changes character
+with duration; it does not say what the best normalisation for this front-end
+would be.
+
+**The 5 s figures remain survivor figures.** 12 recordings were refused at 5 s
+and the metric is computed over what remained, exactly as §6 describes. The
+refusal was identical under all three models, so it does not bias the contrast,
+but it still bounds what the absolute 5 s numbers mean.
