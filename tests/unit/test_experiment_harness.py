@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -30,6 +31,7 @@ from scripts.corpus_zambian import scan_unlabelled
 from scripts.experiment import (
     DegradedRecording,
     LazyBackgroundCorpus,
+    _different_source_owner,
     _stable_seed,
     build_trials,
     degrade_many,
@@ -289,6 +291,101 @@ class TestTrialConstruction:
         # Twelve recordings, C(12,2) = 66 pairs; 6 are same-speaker same-session
         # and excluded, 12 are same-speaker cross-session.
         assert trials.n_different_source == 66 - 6 - 12
+
+
+class TestDifferentSourceOwnership:
+    """A different-source trial belongs to two speakers and the bootstrap needs one.
+
+    Which one is not a detail. Recordings arrive grouped by speaker and sorted
+    by identifier, so attributing every trial to the earlier recording's speaker
+    gives the first speaker in the sort a trial against every later recording
+    and the last speaker almost none. On the stored ``amr12.2_clean`` scores at
+    30 s that produced 1,314 trials for the heaviest speaker against 16 for the
+    lightest, and a Kish effective sample of 31 against a nominal 42 — the
+    bootstrap resamples units it assumes are exchangeable, and those are not.
+    """
+
+    def _population(
+        self, n_speakers: int = 20, sessions: int = 2, per_session: int = 2
+    ) -> list[tuple[DegradedRecording, _StubEmbedding]]:
+        rng = np.random.default_rng(7)
+        return [
+            (
+                _degraded(f"spk{speaker:03d}", f"s{session}", index),
+                _StubEmbedding(rng.standard_normal(4)),
+            )
+            for speaker in range(n_speakers)
+            for session in range(sessions)
+            for index in range(per_session)
+        ]
+
+    def test_ownership_does_not_depend_on_which_side_a_recording_falls(self) -> None:
+        """The whole fix: the choice is symmetric in the pair."""
+        assert _different_source_owner("a", "b", "r1", "r2") == _different_source_owner(
+            "b", "a", "r2", "r1"
+        )
+
+    def test_ownership_is_stable_across_interpreters(self) -> None:
+        """hashlib, not the built-in hash, which is salted per process.
+
+        A salted choice would re-attribute every trial on every run and quietly
+        make the interval irreproducible while leaving the point estimate alone.
+        """
+        script = (
+            "from scripts.experiment import _different_source_owner;"
+            "print(_different_source_owner('a', 'b', 'rec-one', 'rec-two'))"
+        )
+        environment = {**os.environ, "PYTHONHASHSEED": "random"}
+        first = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            check=True,
+            env=environment,
+        )
+        second = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            check=True,
+            env=environment,
+        )
+        assert first.stdout.strip() == second.stdout.strip()
+
+    def test_the_effective_sample_size_is_close_to_the_speaker_count(self) -> None:
+        trials = build_trials(self._population(), _StubSystem())
+        effective = trials.kish_effective_sample_size
+
+        assert trials.n_speakers == 20
+        # Perfectly even ownership would give exactly 20. What is being ruled
+        # out is the old rule's 31-of-42, which is three quarters.
+        assert effective > 0.95 * trials.n_speakers
+
+    def test_attributing_to_the_first_recording_would_have_been_far_worse(self) -> None:
+        """The comparison that makes the number above mean something."""
+        embedded = self._population()
+        trials = build_trials(embedded, _StubSystem())
+
+        # Reproduce the old rule: every different-source trial to the earlier
+        # recording's speaker.
+        metadata = [recording for recording, _ in embedded]
+        old_owners: list[str] = []
+        for index, probe in enumerate(metadata):
+            for candidate in metadata[index + 1 :]:
+                if candidate.speaker_id != probe.speaker_id:
+                    old_owners.append(probe.speaker_id)
+        counts = np.array(list(Counter(old_owners).values()), dtype=float)
+        old_effective = float(counts.sum() ** 2 / np.sum(counts**2))
+
+        assert old_effective < 0.8 * trials.n_speakers
+        assert trials.kish_effective_sample_size > old_effective
+
+    def test_same_source_trials_are_still_owned_by_their_shared_speaker(self) -> None:
+        embedded = self._population(n_speakers=4)
+        trials = build_trials(embedded, _StubSystem())
+        for speaker, label in zip(trials.speakers, trials.labels, strict=True):
+            if label == 1:
+                assert speaker.startswith("spk")
 
 
 class TestStableSeeding:

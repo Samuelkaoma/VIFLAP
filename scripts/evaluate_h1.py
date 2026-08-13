@@ -114,6 +114,14 @@ class CellResult:
     codec_mode: str
 
     n_evaluation_speakers: int
+    kish_effective_speakers: float
+    """Effective resampling units, given how unevenly speakers own trials.
+
+    Reported beside the nominal count because the bootstrap treats speakers as
+    exchangeable and they are not exactly so: a cell whose 42 speakers behave
+    like 31 has a wider true interval than its count suggests, and nothing else
+    in the output shows it."""
+
     n_same_source: int
     n_different_source: int
     n_refused: int
@@ -241,6 +249,7 @@ def evaluate_cell(
                 duration_seconds=duration,
                 codec_mode=codec_mode,
                 n_evaluation_speakers=len({r.speaker_id for r, _ in eval_embedded}),
+                kish_effective_speakers=float("nan"),
                 n_same_source=0,
                 n_different_source=0,
                 n_refused=n_refused,
@@ -342,6 +351,7 @@ def evaluate_cell(
             duration_seconds=duration,
             codec_mode=codec_mode,
             n_evaluation_speakers=eval_trials.n_speakers,
+            kish_effective_speakers=round(eval_trials.kish_effective_sample_size, 2),
             n_same_source=eval_trials.n_same_source,
             n_different_source=eval_trials.n_different_source,
             n_refused=n_refused,

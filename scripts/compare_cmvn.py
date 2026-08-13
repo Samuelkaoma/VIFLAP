@@ -232,6 +232,7 @@ class Comparison:
     condition: str
     codec_mode: str
     n_evaluation_speakers: int
+    kish_effective_speakers: float
     n_same_source: int
     n_different_source: int
     n_paired_recordings: int
@@ -398,6 +399,7 @@ def compare(
         condition=condition.label,
         codec_mode=sorted(codec_modes)[0] if codec_modes else "unknown",
         n_evaluation_speakers=reference_trials.n_speakers,
+        kish_effective_speakers=round(reference_trials.kish_effective_sample_size, 2),
         n_same_source=reference_trials.n_same_source,
         n_different_source=reference_trials.n_different_source,
         n_paired_recordings=n_paired,

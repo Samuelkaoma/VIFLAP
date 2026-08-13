@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from collections import Counter
 from collections.abc import Iterable, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
@@ -360,9 +361,48 @@ class Trial:
     is_same_source: bool
     speaker: str
     """The resampling unit. For a same-source trial this is the shared speaker;
-    for a different-source trial it is the first recording's speaker. Either way
-    a trial belongs to exactly one resampling unit, which is what the speaker
-    bootstrap requires."""
+    for a different-source trial it is one of the two, chosen by
+    :func:`_different_source_owner`. Either way a trial belongs to exactly one
+    resampling unit, which is what the speaker bootstrap requires."""
+
+
+def _different_source_owner(first: str, second: str, first_id: str, second_id: str) -> str:
+    """Which of two speakers a different-source trial is attributed to.
+
+    A different-source trial genuinely belongs to two speakers, and the cluster
+    bootstrap needs it to belong to one. Attributing it to the *first*
+    recording's speaker — the obvious choice, and the one this used — is not
+    neutral, because the recordings arrive grouped by speaker and sorted by
+    identifier. Under that rule the first speaker in the sort owns a trial
+    against every later recording in the set and the last speaker owns almost
+    none. Measured on ``amr12.2_clean`` at 30 s: 1,314 trials for the heaviest
+    speaker against 16 for the lightest, and a Kish effective sample size of 31
+    against a nominal 42.
+
+    That skew is a defect rather than a nuisance. The bootstrap draws speakers
+    as exchangeable units, and units carrying a hundredfold difference in
+    influence are not exchangeable — so the resampling distribution is driven by
+    whether a handful of early speakers were drawn.
+
+    The owner is therefore chosen by hashing the two recording identifiers as an
+    **unordered** pair, which makes the choice independent of which side of the
+    comparison a recording happened to fall on, splits each speaker pair's
+    trials roughly evenly between the two, and is stable across interpreters and
+    runs. ``hashlib`` rather than the built-in ``hash``, which is salted per
+    process and would give a different attribution — and therefore a different
+    interval — on every run.
+
+    This changes no point estimate. Ownership enters only the resampling, so
+    every ``C_llr``, ``C_llr_min`` and EER computed on a full trial set is
+    exactly what it was; the intervals around them change.
+    """
+    # Both the hash key and the choice it indexes are built from the pair
+    # *sorted*, so the result names a speaker rather than a side. Hashing the
+    # sorted key but indexing the arguments in the order given would still pick
+    # by position, which is the defect this exists to remove.
+    ordered = sorted(((first_id, first), (second_id, second)))
+    digest = hashlib.sha256("|".join(name for name, _ in ordered).encode("utf-8")).digest()
+    return ordered[digest[0] & 1][1]
 
 
 @dataclass(frozen=True, slots=True)
@@ -384,6 +424,24 @@ class TrialSet:
     @property
     def n_speakers(self) -> int:
         return len(set(self.speakers))
+
+    @property
+    def kish_effective_sample_size(self) -> float:
+        """Effective number of resampling units, given how unevenly they own trials.
+
+        ``(sum n_i)^2 / sum n_i^2`` over the trials each speaker owns. It equals
+        the speaker count when every speaker owns equally and falls toward one
+        as a single speaker comes to own everything, so it is the direct measure
+        of whether the units the bootstrap treats as exchangeable actually are.
+
+        Worth reporting beside the speaker count rather than instead of it: a
+        cell with 42 speakers and an effective 31 has a wider true interval than
+        its nominal count suggests, and nothing else in the output shows that.
+        """
+        if not self.speakers:
+            return 0.0
+        counts = np.array(list(Counter(self.speakers).values()), dtype=np.float64)
+        return float(counts.sum() ** 2 / np.sum(counts**2))
 
 
 def build_trials(
@@ -449,9 +507,17 @@ def build_trials(
             different_indices = [different_indices[int(i)] for i in chosen]
 
         for offset in different_indices:
+            candidate = candidates[offset]
             scores.append(float(row[offset]))
             labels.append(0)
-            speakers.append(probe.speaker_id)
+            speakers.append(
+                _different_source_owner(
+                    probe.speaker_id,
+                    candidate.speaker_id,
+                    probe.recording_id,
+                    candidate.recording_id,
+                )
+            )
 
     return TrialSet(
         scores=np.array(scores, dtype=np.float64),

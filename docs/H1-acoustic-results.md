@@ -1842,7 +1842,7 @@ in nothing but the window:
 |---|---|---|
 | `ivec-plda-d5023efe82508a33` | 300 frames | local at 30 s, global at 5 s — the confounded baseline |
 | `ivec-plda-b2db0f6fcf6fbd4b` | utterance | **global** at every duration |
-| `ivec-plda-ea5b74e0e2b1cbdd` | 100 frames | **local** at every duration |
+| `ivec-plda-311ddae15a2ea994` | 100 frames | **local** at every duration |
 
 The two controls bracket the baseline rather than merely replacing it. One holds
 the operation global everywhere, the other holds it local everywhere; neither

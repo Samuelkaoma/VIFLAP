@@ -180,13 +180,24 @@ def render(payload: dict[str, Any]) -> str:
 
     trials = next((c for c in cells if c["n_same_source"]), None)
     if trials is not None:
-        lines.append(
+        # The Kish figure is absent from reports written before it was recorded.
+        # Left out rather than guessed at: the claim that follows it is about
+        # this run's resampling base, and a default would make it about nothing.
+        effective = trials.get("kish_effective_speakers")
+        speakers = trials["n_evaluation_speakers"]
+        sentence = (
             f"Trial counts at full duration: {trials['n_same_source']} same-source "
             f"(cross-session only) and {trials['n_different_source']} "
-            f"different-source, over {trials['n_evaluation_speakers']} speakers. "
+            f"different-source, over {speakers} speakers. "
             f"The speaker count, not the trial count, is the effective sample "
             f"size, and it is what the intervals reflect."
         )
+        if isinstance(effective, int | float) and effective == effective:
+            sentence += (
+                f" Speakers do not own trials equally, so the Kish effective "
+                f"count is {effective:.1f} of {speakers}."
+            )
+        lines.append(sentence)
         lines.append("")
 
     lines.append(

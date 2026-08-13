@@ -77,6 +77,7 @@ class CapacityCell:
     codec_mode: str
 
     n_evaluation_speakers: int
+    kish_effective_speakers: float
     n_same_source: int
     n_different_source: int
 
@@ -232,6 +233,7 @@ def evaluate_cell(
         duration_seconds=duration,
         codec_mode=codec_mode,
         n_evaluation_speakers=baseline_trials.n_speakers,
+        kish_effective_speakers=round(baseline_trials.kish_effective_sample_size, 2),
         n_same_source=baseline_trials.n_same_source,
         n_different_source=baseline_trials.n_different_source,
         n_refused_baseline=len(failed_baseline),
