@@ -1,9 +1,13 @@
 name: Channel validation
 
 # Manual, not on push. This measures rather than checks: it needs an AMR-NB
-# encoder that the test runners do not otherwise install, it takes minutes, and
-# its output is a research artefact rather than a pass/fail signal. Running it on
+# encoder the test runners do not otherwise install, it takes minutes, and its
+# output is a research artefact rather than a pass/fail signal. Running it on
 # every push would spend the time and bury the result.
+#
+# It exists because the development machine has no ffmpeg build carrying AMR-NB,
+# which is why every absolute figure in docs/H1-acoustic-results.md is scoped
+# "through this parametric model". A GitHub runner has one an apt-get away.
 on:
   workflow_dispatch:
     inputs:
@@ -13,6 +17,11 @@ on:
       max_seconds:
         description: "Seconds of each recording"
         default: "30"
+
+# Needed to commit the report back. Contents is the only scope granted, and the
+# job writes exactly one file.
+permissions:
+  contents: write
 
 jobs:
   measure:
@@ -25,15 +34,15 @@ jobs:
           python-version: "3.13"
           cache: pip
 
-      # The whole reason this job exists. The machine the experiments ran on had
-      # no ffmpeg build carrying AMR-NB, so every figure in the results document
-      # passed through a parametric model of the coder rather than the coder.
-      # Ubuntu's ffmpeg does carry it.
+      # The whole reason this job exists. Ubuntu's ffmpeg carries the encoder
+      # the development machine lacks. Printed rather than merely installed, so
+      # the log records which encoder was actually present.
       - name: Install an AMR-NB capable ffmpeg
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg libopencore-amrnb-dev
-          ffmpeg -hide_banner -encoders | grep -i amr || true
+          echo "--- AMR encoders visible to ffmpeg ---"
+          ffmpeg -hide_banner -encoders | grep -i amr || echo "NONE"
 
       - name: Install
         run: |
@@ -42,7 +51,8 @@ jobs:
 
       # The corpus is not in the repository and must not be. Two speakers is
       # ample: the comparison is one coder against another over identical input,
-      # so it needs representative speech rather than a corpus.
+      # so it needs representative speech rather than a corpus. The selection is
+      # deterministic, so the sample is the same on every run.
       - name: Fetch a minimal speech sample
         run: |
           python -m scripts.fetch_corpus \
@@ -50,21 +60,57 @@ jobs:
             --chapters-per-speaker 2 \
             --utterances-per-chapter 6
 
+      # The script exits non-zero when no encoder is available, which is the
+      # correct behaviour and must not abort the run: "there is no encoder here
+      # either" is itself a result worth committing. The status is captured and
+      # re-raised at the end so the job's own outcome still tells the truth.
       - name: Measure
+        id: measure
         run: |
+          set +e
           python -m scripts.validate_channel \
             --audio data/corpus/librispeech \
             --pattern '*.flac' \
             --max-recordings ${{ inputs.max_recordings }} \
             --max-seconds ${{ inputs.max_seconds }} \
-            --output channel_validation.json
+            --output data/reports/channel_validation.json
+          echo "status=$?" >> "$GITHUB_OUTPUT"
 
-      # An artefact rather than a commit. The report belongs in data/reports,
-      # which is deliberately ignored, and force-adding from CI would push a
-      # research artefact into the history on a runner's authority rather than
-      # on a decision. Download it and commit it locally if it is worth keeping.
+      # Committed rather than left as an artefact only. Downloading an artefact
+      # and retyping a table is how a figure gets carried into a context it does
+      # not hold in, which this project has recorded twice — §12 read a
+      # back-end training size as a whole training resource, and §14 ported a
+      # bias shift measured at 42 speakers onto a result computed on 102. A
+      # number that arrives by commit is the number that was measured.
+      #
+      # Force-added by name: data/ is ignored so that evidence cannot reach the
+      # history by accident, and one named report is not a reason to relax that.
+      - name: Commit the report
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f data/reports/channel_validation.json
+          if git diff --cached --quiet; then
+            echo "the report is unchanged from the committed one"
+          else
+            git commit -m "Measure the real AMR-NB coder against the parametric model
+
+          Produced by the channel-validation workflow on a runner with
+          libopencore-amrnb, which the development machine does not have."
+            git push
+          fi
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: channel-validation
-          path: channel_validation.json
+          path: data/reports/channel_validation.json
+
+      # Last, so the report is committed either way. A run that found no encoder
+      # has still recorded something useful and should still be red.
+      - name: Report whether a reference coder was actually found
+        run: |
+          if [ "${{ steps.measure.outputs.status }}" != "0" ]; then
+            echo "::error::no AMR-NB encoder was available, so no validation was made"
+            exit 1
+          fi

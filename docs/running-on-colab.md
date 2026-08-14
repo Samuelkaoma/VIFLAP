@@ -102,12 +102,26 @@ token into a cell, or just download the file.
 
 ---
 
-## The headless alternative
+## The headless alternative, which is the better one for this job
 
-`.github/workflows/channel-validation.yml` does the same thing with no browser:
-trigger it from the Actions tab, and it installs the encoder, fetches a minimal
-sample, measures, and uploads the report as an artefact. Free runners are 2-core
-with a 6-hour cap — useless for a sweep, ample for this.
+`.github/workflows/channel-validation.yml` does the same thing with no browser
+and, crucially, **no credentials**: `actions/checkout` uses the automatic per-run
+token, so a private repository needs no personal access token and nothing has to
+be uploaded. Trigger it from the Actions tab; it installs the encoder, fetches a
+deterministic two-speaker sample, measures, commits the report back, and uploads
+it as an artefact as well.
+
+The result is the same result, not merely the same kind of one: the same Ubuntu
+ffmpeg package and the same `libopencore-amrnb`, the parametric coder is seeded,
+and the corpus selection is deterministic. Free runners are 2-core with a 6-hour
+cap — useless for a sweep, ample for a measurement that takes minutes.
+
+The report arrives as a commit rather than as a table to retype. That is
+deliberate: carrying a figure by hand from one context into another is how §12
+read a back-end training size as a whole training resource and how §14 ported a
+bias shift measured at 42 speakers onto a result computed on 102. Both are
+recorded in the results document. A number that arrives by commit is the number
+that was measured.
 
 Kaggle is the third option and the only one with a real CLI (`kaggle kernels
 push`, `status`, `output`), which makes it the right home for the extractor
