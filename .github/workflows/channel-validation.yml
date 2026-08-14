@@ -1,0 +1,70 @@
+name: Channel validation
+
+# Manual, not on push. This measures rather than checks: it needs an AMR-NB
+# encoder that the test runners do not otherwise install, it takes minutes, and
+# its output is a research artefact rather than a pass/fail signal. Running it on
+# every push would spend the time and bury the result.
+on:
+  workflow_dispatch:
+    inputs:
+      max_recordings:
+        description: "Recordings to measure"
+        default: "6"
+      max_seconds:
+        description: "Seconds of each recording"
+        default: "30"
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      # The whole reason this job exists. The machine the experiments ran on had
+      # no ffmpeg build carrying AMR-NB, so every figure in the results document
+      # passed through a parametric model of the coder rather than the coder.
+      # Ubuntu's ffmpeg does carry it.
+      - name: Install an AMR-NB capable ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg libopencore-amrnb-dev
+          ffmpeg -hide_banner -encoders | grep -i amr || true
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[experiments,dev]"
+
+      # The corpus is not in the repository and must not be. Two speakers is
+      # ample: the comparison is one coder against another over identical input,
+      # so it needs representative speech rather than a corpus.
+      - name: Fetch a minimal speech sample
+        run: |
+          python -m scripts.fetch_corpus \
+            --max-speakers 2 \
+            --chapters-per-speaker 2 \
+            --utterances-per-chapter 6
+
+      - name: Measure
+        run: |
+          python -m scripts.validate_channel \
+            --audio data/corpus/librispeech \
+            --pattern '*.flac' \
+            --max-recordings ${{ inputs.max_recordings }} \
+            --max-seconds ${{ inputs.max_seconds }} \
+            --output channel_validation.json
+
+      # An artefact rather than a commit. The report belongs in data/reports,
+      # which is deliberately ignored, and force-adding from CI would push a
+      # research artefact into the history on a runner's authority rather than
+      # on a decision. Download it and commit it locally if it is worth keeping.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: channel-validation
+          path: channel_validation.json
