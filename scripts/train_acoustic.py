@@ -38,6 +38,7 @@ import sys
 import time
 from collections.abc import Sequence
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 
@@ -87,20 +88,142 @@ TRAINING_CONDITIONS: tuple[DegradationCondition, ...] = (
 )
 
 
-def assign_conditions(
+def assign_conditions_globally(
     n_recordings: int, seed: int = DEGRADATION_SEED
 ) -> list[DegradationCondition]:
-    """Give each training recording a channel condition.
+    """Cycle a permuted list, ignoring who is speaking.
 
-    Assigned by cycling a permuted list rather than by independent draws, so the
-    conditions are exactly balanced. Independent draws leave one condition
-    over-represented by chance, and since condition is confounded with whichever
-    speakers received it, that imbalance becomes a speaker effect.
+    Exactly balanced corpus-wide, which is what it was written for: independent
+    draws leave one condition over-represented by chance, and condition is
+    confounded with whichever speakers received it.
+
+    It does not balance *within* a speaker, and that is the defect
+    :func:`assign_conditions` exists to fix. Retained so the two can be compared
+    on the same corpus rather than the old behaviour being replaced by
+    assertion — see :func:`assign_conditions` for what is at stake.
     """
     rng = np.random.default_rng(seed)
     order = rng.permutation(n_recordings)
     conditions = list(TRAINING_CONDITIONS)
     return [conditions[int(position) % len(conditions)] for position in order]
+
+
+def assign_conditions(
+    speaker_ids: Sequence[str], seed: int = DEGRADATION_SEED
+) -> list[DegradationCondition]:
+    """Give each training recording a channel condition, balanced within speaker.
+
+    Corpus-wide balance is not enough, and the reason is specific to what PLDA
+    estimates. A speaker's recordings are the only evidence the model has about
+    within-speaker variability; whatever is *common* to them is, as far as the
+    model can tell, the speaker. Under a global permutation each speaker draws
+    their conditions at random from the balanced pool, so each carries a mean
+    channel offset of their own — one speaker happens to be mostly 4.75 kbit/s
+    in babble, another mostly 12.2 clean — and LDA and PLDA absorb that offset
+    as between-speaker variance. The model learns a channel and reports it as a
+    person.
+
+    The allocation here removes the offset instead of hoping it averages out.
+    Speakers are taken in a fixed order and each is given a *contiguous block*
+    of the condition cycle, the cycle continuing across speaker boundaries:
+
+    .. code-block:: text
+
+        conditions   c0 c1 c2 c3 c4 c5 c6 c7 c0 c1 c2 c3 ...
+        speaker      |--- A (5) ---|--- B (4) --|-- C (3) --
+
+    Every speaker therefore receives ``min(n_recordings, 8)`` *distinct*
+    conditions with no repeat until the design is exhausted, which is the Latin
+    square's within-block property carried over to blocks of unequal size. The
+    corpus-wide counts are unchanged — the cycle is contiguous, so the totals
+    are the same as running it straight through — and the starting point rotates
+    across speakers, so no condition attaches preferentially to the speakers
+    sorting early.
+
+    The order *within* a speaker is then permuted. Without that, condition would
+    track position in the recording list, which for LibriSpeech means chapter
+    order, and a systematic association between condition and session is the
+    same defect one level down.
+
+    Whether this matters is an empirical question and is not settled by the
+    argument above: the whole point is to be able to retrain with it and see
+    whether the leading between-speaker variance falls. ``psi[0]`` runs 5.1 to
+    7.0 times ``psi[1]`` across every model trained so far, which is what one
+    dominant nuisance axis looks like, but a spike consistent with a confound is
+    not a confound measured.
+    """
+    rng = np.random.default_rng(seed)
+    conditions = list(TRAINING_CONDITIONS)
+    n_conditions = len(conditions)
+
+    positions_by_speaker: dict[str, list[int]] = {}
+    for index, speaker in enumerate(speaker_ids):
+        positions_by_speaker.setdefault(speaker, []).append(index)
+
+    assigned: list[DegradationCondition | None] = [None] * len(speaker_ids)
+    offset = 0
+    # Sorted rather than insertion-ordered so the allocation depends on the
+    # corpus and not on the order a scan happened to walk the filesystem in.
+    for speaker in sorted(positions_by_speaker):
+        positions = positions_by_speaker[speaker]
+        block = [conditions[(offset + i) % n_conditions] for i in range(len(positions))]
+        shuffled = rng.permutation(len(positions))
+        for slot, position in enumerate(positions):
+            assigned[position] = block[int(shuffled[slot])]
+        offset += len(positions)
+
+    if any(condition is None for condition in assigned):
+        raise RuntimeError(
+            "some recordings were left without a channel condition, which means "
+            "the allocation did not cover every position it was given"
+        )
+    return cast("list[DegradationCondition]", assigned)
+
+
+def condition_balance(
+    speaker_ids: Sequence[str], conditions: Sequence[DegradationCondition]
+) -> dict[str, float]:
+    """How evenly the channel conditions fell across and within speakers.
+
+    Recorded in the training report so the allocation is visible in the artefact
+    rather than being a property of a function nobody reads. Every model this
+    project has trained was built under an allocation that is exactly balanced
+    corpus-wide and unbalanced within speaker, and nothing written down said so.
+
+    ``speaker_mean_bitrate_sd`` is the figure that matters. It is the standard
+    deviation across speakers of each speaker's mean training bitrate — that is,
+    the size of the per-speaker channel offset that LDA and PLDA have no way to
+    distinguish from the speaker. Corpus-wide balance leaves it non-zero; the
+    stratified allocation is what drives it toward zero.
+    """
+    by_speaker: dict[str, list[DegradationCondition]] = {}
+    for speaker, condition in zip(speaker_ids, conditions, strict=True):
+        by_speaker.setdefault(speaker, []).append(condition)
+
+    distinct = [len({c.label for c in items}) for items in by_speaker.values()]
+    reachable = [min(len(items), len(TRAINING_CONDITIONS)) for items in by_speaker.values()]
+    mean_bitrates = [
+        float(np.mean([c.bitrate_kbps for c in items])) for items in by_speaker.values()
+    ]
+    counts = np.array(
+        [
+            sum(1 for c in conditions if c.label == reference.label)
+            for reference in TRAINING_CONDITIONS
+        ],
+        dtype=float,
+    )
+
+    return {
+        "n_speakers": float(len(by_speaker)),
+        "mean_distinct_conditions_per_speaker": float(np.mean(distinct)),
+        "mean_reachable_conditions_per_speaker": float(np.mean(reachable)),
+        "speakers_with_a_repeated_condition": float(
+            np.mean([d < r for d, r in zip(distinct, reachable, strict=True)])
+        ),
+        "speaker_mean_bitrate_sd": float(np.std(mean_bitrates)),
+        "corpus_condition_count_min": float(counts.min()),
+        "corpus_condition_count_max": float(counts.max()),
+    }
 
 
 def build_config(
@@ -149,6 +272,7 @@ def train(
     workers: int | None = None,
     seed: int = DEGRADATION_SEED,
     background: Sequence[TrainingRecording] | None = None,
+    condition_allocation: str = "stratified",
 ) -> dict[str, object]:
     """Degrade the training partition, train on it, and save the model.
 
@@ -163,11 +287,17 @@ def train(
     the pool is small enough to hold.
     """
     training = list(training)
-    conditions = assign_conditions(len(training), seed=seed)
+    if condition_allocation == "stratified":
+        conditions = assign_conditions([r.speaker_id for r in training], seed=seed)
+    elif condition_allocation == "global":
+        conditions = assign_conditions_globally(len(training), seed=seed)
+    else:
+        raise ValueError(f"unknown condition allocation {condition_allocation!r}")
 
     print(
         f"degrading {len(training)} training recordings across "
-        f"{len(TRAINING_CONDITIONS)} channel conditions on "
+        f"{len(TRAINING_CONDITIONS)} channel conditions "
+        f"({condition_allocation}) on "
         f"{worker_count(workers)} workers",
         flush=True,
     )
@@ -215,6 +345,10 @@ def train(
         "model_path": str(output),
         "split": split_summary,
         "training_conditions": [c.label for c in TRAINING_CONDITIONS],
+        "condition_allocation": condition_allocation,
+        "condition_balance": condition_balance(
+            [r.speaker_id for r in training], conditions
+        ),
         "codec": codec_summary,
         "degrade_seconds": round(degrade_seconds, 1),
         "train_seconds": round(train_seconds, 1),
@@ -258,6 +392,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             "seconds). A fixed window spans a different fraction of a short "
             "recording than of a long one, so hold this at a duration-invariant "
             "setting when duration is the factor under test."
+        ),
+    )
+    parser.add_argument(
+        "--condition-allocation",
+        choices=["stratified", "global"],
+        default="stratified",
+        help=(
+            "how training channel conditions are dealt out. 'stratified' gives "
+            "each speaker a contiguous block of the condition cycle, so every "
+            "speaker sees as many distinct conditions as they have recordings "
+            "and carries no mean channel offset. 'global' permutes across the "
+            "whole corpus, which is balanced corpus-wide and leaves each speaker "
+            "with an offset of their own for LDA and PLDA to absorb as "
+            "between-speaker variance. Every model trained before this flag "
+            "existed used 'global', which is the only reason it is still here."
         ),
     )
     parser.add_argument("--recording-seconds", type=float, default=30.0)
@@ -362,6 +511,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         plan_split.summary(),
         workers=arguments.workers,
         background=background,
+        condition_allocation=arguments.condition_allocation,
     )
 
     arguments.report.parent.mkdir(parents=True, exist_ok=True)
