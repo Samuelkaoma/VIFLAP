@@ -1,18 +1,31 @@
 {
-  "available": false,
-  "reference_mode": null,
+  "available": true,
+  "reference_mode": "reference_amr",
   "parametric_mode": "parametric_celp",
-  "ffmpeg_encoder": null,
+  "ffmpeg_encoder": "libopencore_amrnb",
   "n_recordings": 6,
   "bitrates_kbps": [
     12.2,
     4.75
   ],
   "sample_rate": 16000,
-  "elapsed_seconds": 7.7,
-  "notes": [
-    "no AMR-NB encoder is available in this ffmpeg build, so the reference comparison could not be made. The parametric model's distortion against a band-matched source is still reported, but it is not a validation of anything: it is the same measurement \u00a716 already records, and the number that scopes this project is the difference between the two coders."
-  ],
+  "elapsed_seconds": 11.9,
+  "ffmpeg": {
+    "ffmpeg_path": "/usr/bin/ffmpeg",
+    "version": "ffmpeg version 6.1.1-3ubuntu5 Copyright (c) 2000-2023 the FFmpeg developers",
+    "configuration": "configuration: --prefix=/usr --extra-version=3ubuntu5 --toolchain=hardened --libdir=/usr/lib/x86_64-linux-gnu --incdir=/usr/include/x86_64-linux-gnu --arch=amd64 --enable-gpl --disable-stripping --disable-omx --enable-gnutls --enable-libaom --enable-libass --enable-libbs2b --enable-libcaca --enable-libcdio --enable-libcodec2 --enable-libdav1d --enable-libflite --enable-libfontconfig --enable-libfreetype --enable-libfribidi --enable-libglslang --enable-libgme --enable-libgsm --enable-libharfbuzz --enable-libmp3lame --enable-libmysofa --enable-libopenjpeg --enable-libopenmpt --enable-libopus --enable-librubberband --enable-libshine --enable-libsnappy --enable-libsoxr --enable-libspeex --enable-libtheora --enable-libtwolame --enable-libvidstab --enable-libvorbis --enable-libvpx --enable-libwebp --enable-libx265 --enable-libxml2 --enable-libxvid --enable-libzimg --enable-openal --enable-opencl --enable-opengl --disable-sndio --enable-libvpl --disable-libmfx --enable-libdc1394 --enable-libdrm --enable-libiec61883 --enable-chromaprint --enable-frei0r --enable-ladspa --enable-libbluray --enable-libjack --enable-libpulse --enable-librabbitmq --enable-librist --enable-libsrt --enable-libssh --enable-libsvtav1 --enable-libx264 --enable-libzmq --enable-libzvbi --enable-lv2 --enable-sdl2 --enable-libplacebo --enable-librav1e --enable-pocketsphinx --enable-librsvg --enable-libjxl --enable-shared",
+    "amr_encoder_lines": [
+      "A....D libopencore_amrnb    OpenCORE AMR-NB (Adaptive Multi-Rate Narrow-Band) (codec amr_nb)",
+      "A....D libvo_amrwbenc       Android VisualOn AMR-WB (Adaptive Multi-Rate Wide-Band) (codec amr_wb)"
+    ],
+    "amr_decoder_lines": [
+      "A....D amrnb                AMR-NB (Adaptive Multi-Rate NarrowBand) (codec amr_nb)",
+      "A....D libopencore_amrnb    OpenCORE AMR-NB (Adaptive Multi-Rate Narrow-Band) (codec amr_nb)",
+      "A....D amrwb                AMR-WB (Adaptive Multi-Rate WideBand) (codec amr_wb)",
+      "A....D libopencore_amrwb    OpenCORE AMR-WB (Adaptive Multi-Rate Wide-Band) (codec amr_wb)"
+    ]
+  },
+  "notes": [],
   "source_files": [
     "data/corpus/librispeech/374/180298/374-180298-0006.flac",
     "data/corpus/librispeech/374/180298/374-180298-0021.flac",
@@ -38,6 +51,36 @@
       "max_delay_samples": 0
     },
     {
+      "label": "reference vs band-matched source @ 12.2",
+      "reference": "band_matched_source",
+      "subject": "reference_amr",
+      "bitrate_kbps": 12.2,
+      "n_recordings": 6,
+      "n_frames": 6201,
+      "mean_spectral_distortion_db": 2.9984,
+      "median_spectral_distortion_db": 2.8605,
+      "fraction_frames_above_2db": 0.8481,
+      "mean_segmental_snr_db": 3.7504,
+      "median_segmental_snr_db": 4.1366,
+      "mean_delay_samples": 39.7,
+      "max_delay_samples": 40
+    },
+    {
+      "label": "parametric vs reference @ 12.2",
+      "reference": "reference_amr",
+      "subject": "parametric_celp",
+      "bitrate_kbps": 12.2,
+      "n_recordings": 6,
+      "n_frames": 5754,
+      "mean_spectral_distortion_db": 6.7251,
+      "median_spectral_distortion_db": 6.2362,
+      "fraction_frames_above_2db": 0.999,
+      "mean_segmental_snr_db": -1.6234,
+      "median_segmental_snr_db": -1.651,
+      "mean_delay_samples": 23.0,
+      "max_delay_samples": 106
+    },
+    {
       "label": "parametric vs band-matched source @ 4.75",
       "reference": "band_matched_source",
       "subject": "parametric_celp",
@@ -51,6 +94,36 @@
       "median_segmental_snr_db": 1.7067,
       "mean_delay_samples": 0.0,
       "max_delay_samples": 0
+    },
+    {
+      "label": "reference vs band-matched source @ 4.75",
+      "reference": "band_matched_source",
+      "subject": "reference_amr",
+      "bitrate_kbps": 4.75,
+      "n_recordings": 6,
+      "n_frames": 6032,
+      "mean_spectral_distortion_db": 5.2658,
+      "median_spectral_distortion_db": 5.1615,
+      "fraction_frames_above_2db": 0.9975,
+      "mean_segmental_snr_db": 1.939,
+      "median_segmental_snr_db": 1.6573,
+      "mean_delay_samples": 39.5,
+      "max_delay_samples": 40
+    },
+    {
+      "label": "parametric vs reference @ 4.75",
+      "reference": "reference_amr",
+      "subject": "parametric_celp",
+      "bitrate_kbps": 4.75,
+      "n_recordings": 6,
+      "n_frames": 5353,
+      "mean_spectral_distortion_db": 7.491,
+      "median_spectral_distortion_db": 7.0247,
+      "fraction_frames_above_2db": 1.0,
+      "mean_segmental_snr_db": -1.927,
+      "median_segmental_snr_db": -1.6931,
+      "mean_delay_samples": 18.7,
+      "max_delay_samples": 79
     }
   ]
 }
