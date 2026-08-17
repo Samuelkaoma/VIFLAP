@@ -48,13 +48,24 @@ jobs:
           python-version: "3.13"
           cache: pip
 
-      # The whole reason this job exists. Ubuntu's ffmpeg carries the encoder
-      # the development machine lacks. Printed rather than merely installed, so
-      # the log records which encoder was actually present.
+      # The whole reason this job exists: a runner can install the encoder the
+      # development machine lacks.
+      #
+      # `ffmpeg` alone is not enough, and the first run of this workflow proved
+      # it — it reported no AMR-NB encoder at all. Debian and Ubuntu build
+      # libavcodec twice: the default package omits the patent-encumbered and
+      # GPLv3 codecs, and `libavcodec-extra` is the flavour carrying them,
+      # opencore-amr among them. Installing ffmpeg without it gets a working
+      # ffmpeg that cannot do the one thing it was installed for.
+      #
+      # Printed rather than merely installed, so the log records what was
+      # actually present — though the log is not readable from the environment
+      # that triggers this, which is why the report itself now carries the same
+      # probe.
       - name: Install an AMR-NB capable ffmpeg
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg libopencore-amrnb-dev
+          sudo apt-get install -y -qq ffmpeg libavcodec-extra libopencore-amrnb-dev
           echo "--- AMR encoders visible to ffmpeg ---"
           ffmpeg -hide_banner -encoders | grep -i amr || echo "NONE"
 

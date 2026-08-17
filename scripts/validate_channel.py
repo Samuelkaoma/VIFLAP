@@ -102,6 +102,27 @@ class PairwiseDistortion:
 
 
 @dataclass(slots=True)
+class FfmpegProbe:
+    """What ffmpeg build was found, and what it can actually do with AMR.
+
+    ``available: false`` alone does not say why, and on a remote runner there is
+    no second chance to look: this project's development environment cannot
+    reach ``api.github.com``, so the committed report is the only thing that
+    comes back from a workflow run. The first run returned
+    ``ffmpeg_encoder: null`` and nothing else, which is consistent with ffmpeg
+    being absent, with ffmpeg being present but built without the codec, and
+    with the codec being present under a name the probe does not look for.
+    Distinguishing those costs one subprocess and decides what to try next.
+    """
+
+    ffmpeg_path: str | None
+    version: str | None
+    configuration: str | None
+    amr_encoder_lines: list[str] = field(default_factory=list)
+    amr_decoder_lines: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class ValidationReport:
     """Everything the run established, including that it could not run."""
 
@@ -113,8 +134,48 @@ class ValidationReport:
     bitrates_kbps: list[float]
     sample_rate: int
     elapsed_seconds: float
+    ffmpeg: FfmpegProbe | None = None
     notes: list[str] = field(default_factory=list)
     comparisons: list[PairwiseDistortion] = field(default_factory=list)
+
+
+def probe_ffmpeg() -> FfmpegProbe:
+    """Ask the ffmpeg on PATH what it is and what AMR support it carries."""
+    import shutil
+    import subprocess
+
+    path = shutil.which("ffmpeg")
+    if path is None:
+        return FfmpegProbe(ffmpeg_path=None, version=None, configuration=None)
+
+    def ask(*arguments: str) -> str:
+        try:
+            completed = subprocess.run(
+                [path, "-hide_banner", *arguments],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        return completed.stdout
+
+    banner = ask("-version")
+    lines = banner.splitlines()
+    return FfmpegProbe(
+        ffmpeg_path=path,
+        version=lines[0].strip() if lines else None,
+        configuration=next(
+            (line.strip() for line in lines if line.startswith("configuration:")), None
+        ),
+        amr_encoder_lines=[
+            line.strip() for line in ask("-encoders").splitlines() if "amr" in line.lower()
+        ],
+        amr_decoder_lines=[
+            line.strip() for line in ask("-decoders").splitlines() if "amr" in line.lower()
+        ],
+    )
 
 
 def _speech_frames(frames: NDArray[np.float64]) -> NDArray[np.bool_]:
@@ -275,6 +336,7 @@ def run(
         bitrates_kbps=list(bitrates),
         sample_rate=sample_rate,
         elapsed_seconds=0.0,
+        ffmpeg=probe_ffmpeg(),
         notes=notes,
     )
 
@@ -341,6 +403,14 @@ def render(report: ValidationReport) -> str:
         + (f" ({report.ffmpeg_encoder})" if report.ffmpeg_encoder else ""),
         f"{report.n_recordings} recordings, {report.sample_rate} Hz source, "
         f"{report.elapsed_seconds:.0f}s",
+    ]
+    if report.ffmpeg is not None:
+        lines.append(f"ffmpeg: {report.ffmpeg.ffmpeg_path or 'not on PATH'}")
+        for line in report.ffmpeg.amr_encoder_lines:
+            lines.append(f"  encoder: {line}")
+        for line in report.ffmpeg.amr_decoder_lines:
+            lines.append(f"  decoder: {line}")
+    lines += [
         "",
         f"{'comparison':<44} {'frames':>7} {'LSD dB':>7} {'>2dB':>6} {'segSNR':>7} {'delay':>6}",
     ]
