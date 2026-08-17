@@ -8,17 +8,29 @@ of work follows from the shape rather than from preference.
 
 ## What this network can and cannot reach
 
-Measured rather than assumed, because it decides which jobs can run here at all:
+Measured rather than assumed, because it decides which jobs can run here at all.
+
+**Retry before concluding anything is blocked.** This link flaps badly — a git
+push takes one to four attempts routinely — and a single failed request means
+nothing. An earlier version of this table listed `huggingface.co` and
+`download.pytorch.org` as blocked on the strength of two attempts each, and both
+are reachable within six. That error was load-bearing: it moved the pre-trained
+extractor import off this machine and onto a runner for no reason. Anything
+recorded here as unreachable should have been tried at least six times.
 
 | Host | From the development machine |
 |---|---|
-| `github.com` over SSH via the `github-Personal` alias | works, link flaps, 1–4 attempts |
+| `github.com` over SSH via the `github-Personal` alias | works, 1–4 attempts |
 | `raw.githubusercontent.com`, `github.com` HTML | works |
 | `pypi.org`, `files.pythonhosted.org` | works |
+| `huggingface.co`, incl. model resolve URLs | **works**, 1–2 attempts |
+| `download.pytorch.org` | **works** |
+| `www.kaggle.com`, `kaggle.com/api/v1` | **works**, 1–2 attempts |
 | `openslr.org` | works, ~5.4 Mbit/s, intermittent |
 | **`api.github.com`** | **blocked** — no `gh`, no workflow dispatch, no artefact download |
-| **`huggingface.co`** | **blocked** — DNS resolves, HTTPS times out |
-| **`download.pytorch.org`** | **no DNS at all** |
+
+`api.github.com` is the one entry that has survived repeated retries across a
+whole session, and it is the only one the workflow design has to work around.
 
 Two consequences follow, and both shaped how the work is now organised.
 
@@ -39,11 +51,12 @@ before measuring anything would otherwise be indistinguishable from a slow one �
 commits a report saying so when it fails. `git fetch` is the only status channel
 there is.
 
-**A pre-trained embedding extractor cannot be downloaded here.** The SpeechBrain
-VoxCeleb2 checkpoint lives on `huggingface.co`, which this network does not
-reach, and the PyTorch wheel index does not resolve. Torch itself installs from
-PyPI, which does work, so the blocker is the checkpoint rather than the
-framework. See "Importing an extractor" below.
+**A pre-trained embedding extractor can be downloaded here after all**, which is
+the correction above in its most consequential form. The SpeechBrain VoxCeleb2
+checkpoint and the PyTorch wheel index are both reachable, so the whole of §12's
+recommended move — import an extractor, retrain only LDA and PLDA — is a local
+job on eight cores rather than something that has to be shipped anywhere. See
+"Importing an extractor" below.
 
 | | Local | Colab free |
 |---|---:|---:|
@@ -215,34 +228,23 @@ training and 1,039 held-out recordings is inference, and ECAPA-TDNN inference on
 eight cores is a matter of hours rather than days. The GPU tiers matter for
 turnaround, not for feasibility.
 
-**It does need one thing this machine cannot do**, which is fetch the
-checkpoint: `huggingface.co` times out here. That is the whole blocker, and it
-is an 80 MB file.
-
-Which gives the split that follows from the shapes rather than from preference:
+**And it does not need anything this machine cannot do.** The checkpoint is an
+80 MB fetch from a host that is reachable, so every stage runs here:
 
 | Stage | Where | Why |
 |---|---|---|
-| Fetch the checkpoint | a runner, Colab or Kaggle | the only machines that can reach it |
+| Fetch the checkpoint | **local** | reachable; one 80 MB download, cached |
 | Degrade the corpus | **local** | pure-Python codec, 8 cores against 2–4 |
-| Extract embeddings | either | CPU-bound; local if the checkpoint is here |
+| Extract embeddings | **local** | CPU inference, hours not days |
 | LDA / PLDA and evaluation | **local** | seconds on 192-dimensional vectors |
 
-The awkward part is the middle, because the corpus is 1.3 GB and gitignored and
-must not move. Two ways round it, and the second is better:
+Nothing has to be shipped anywhere, the corpus never moves, and no 80 MB binary
+needs to enter a repository that deliberately keeps evidence out of its history.
+An earlier version of this document recommended sending the work to a runner and
+having it commit the embeddings back; that recommendation existed only because
+`huggingface.co` had been declared unreachable after two attempts. It is
+withdrawn.
 
-1. **Bring the checkpoint here.** A workflow downloads it and commits it. It is
-   80 MB of binary in a repository that deliberately keeps evidence out of its
-   history, and it is permanent. Simple, and a cost that never goes away.
-2. **Send the embeddings back instead.** A workflow fetches the corpus,
-   degrades, extracts, and commits an `.npz` of embeddings — 2,578 recordings at
-   192 dimensions is about 2 MB. Everything downstream then runs locally with no
-   torch installed at all. The corpus never moves, the checkpoint never lands in
-   the history, and what arrives is exactly the artefact the back-end consumes.
-
-Option 2 costs runner minutes rather than repository weight: the degradation is
-the expensive part and a 2–4 core runner will take one to one and a half hours
-over it, against 26 minutes here. On a private repository that is roughly 90 of
-the 2,000 free minutes a month. It is the right trade the first time; if the
-extractor import becomes iterative, bring the checkpoint here instead and pay
-the 80 MB once.
+The remote tiers keep one genuine advantage — a GPU turns hours of extraction
+into minutes — and that is a turnaround argument rather than a feasibility one.
+It is worth reaching for if the import becomes iterative, and not before.

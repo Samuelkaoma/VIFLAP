@@ -1,0 +1,69 @@
+{
+  "model_id": "ivec-plda-88c22044f3488bf5",
+  "model_path": "models\\acoustic_pooled_global.npz",
+  "split": {
+    "train_recordings": 1539,
+    "train_speakers": 306,
+    "development_recordings": 521,
+    "development_speakers": 102,
+    "evaluation_recordings": 518,
+    "evaluation_speakers": 102
+  },
+  "training_conditions": [
+    "amr12.2_clean",
+    "amr7.4_clean",
+    "amr4.75_clean",
+    "amr12.2_babble20dB",
+    "amr7.4_babble10dB",
+    "amr4.75_vehicle15dB",
+    "amr12.2_vehicle10dB",
+    "amr5.9_babble15dB"
+  ],
+  "condition_allocation": "global",
+  "condition_balance": {
+    "n_speakers": 306.0,
+    "mean_distinct_conditions_per_speaker": 3.9281045751633985,
+    "mean_reachable_conditions_per_speaker": 5.029411764705882,
+    "speakers_with_a_repeated_condition": 0.7516339869281046,
+    "speaker_mean_bitrate_sd": 1.4222314661646223,
+    "corpus_condition_count_min": 192.0,
+    "corpus_condition_count_max": 193.0
+  },
+  "codec": {
+    "codec_modes": [
+      "parametric_celp"
+    ],
+    "is_single_mode": true,
+    "is_reference_codec": false
+  },
+  "degrade_seconds": 1608.1,
+  "train_seconds": 585.7,
+  "describe": {
+    "model_id": "ivec-plda-88c22044f3488bf5",
+    "ubm_components": 128.0,
+    "feature_dimension": 60.0,
+    "ivector_rank": 100.0,
+    "transform_dimension": 100.0,
+    "cmvn_frames": 300.0,
+    "plda_dimension": 100.0,
+    "plda_effective_dimension": 74.0,
+    "plda_inert_psi_threshold": 0.1,
+    "plda_psi_mean": 1.2912773014561052,
+    "plda_psi_max": 44.95107842614698,
+    "plda_psi_1": 44.95107842614698,
+    "plda_psi_2": 6.384315768935503,
+    "plda_psi_ratio": 7.0408607677063495,
+    "plda_n_training_speakers": 306.0,
+    "plda_n_training_recordings": 1539.0,
+    "plda_n_iterations": 35.0,
+    "plda_final_log_likelihood": 115.35802851696528,
+    "plda_converged": 1.0,
+    "n_training_recordings": 1539.0,
+    "n_training_speakers": 306.0,
+    "n_skipped_recordings": 0.0,
+    "mean_frames_per_recording": 2345.1994801819365,
+    "n_frames_total": 3609262.0,
+    "n_frames_ubm": 598671.0,
+    "n_background_recordings": 0.0
+  }
+}

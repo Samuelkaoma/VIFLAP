@@ -2441,3 +2441,123 @@ through the same channel, so severity is common to both arms and cancels.
 that the labels set an LSF step and a pulse count and nothing else — is about
 the implementation rather than about the distortion, and nothing here bears on
 it.
+
+---
+
+## 21. The training conditions were confounded with the speaker, and it was not the cause
+
+§1 records a spectrum whose leading between-speaker variance is five to seven
+times its second, across every model this project has trained and across all
+three cepstral-normalisation front-ends. One dominant axis of between-speaker
+variation is what a nuisance factor absorbed into the speaker subspace looks
+like, and there was an obvious candidate. This section tests it, and the answer
+is no.
+
+### The confound
+
+`assign_conditions` dealt the eight training channel conditions out by a global
+permutation. That is exactly balanced corpus-wide, which is what it was written
+for — independent draws would leave one condition over-represented by chance —
+and it does not balance *within* a speaker.
+
+That matters because of what PLDA estimates. A speaker's recordings are the only
+evidence the model has about within-speaker variability, so whatever is common
+to them is the speaker as far as the model can tell. Under a global permutation
+each speaker draws their conditions at random from the balanced pool, so each
+carries a mean channel offset of their own, and LDA and PLDA have no way to
+distinguish that offset from the person.
+
+Measured on the 306-speaker training partition, 1,539 recordings:
+
+| | global permutation | stratified |
+|---|---:|---:|
+| speakers receiving a repeated condition | **75.2%** | **0%** |
+| distinct conditions per speaker (of 5.03 reachable) | 3.93 | **5.03** |
+| SD across speakers of their mean training bitrate | **1.42 kbit/s** | **0.66 kbit/s** |
+| corpus-wide condition counts | 192–193 | 192–193 |
+
+The last row is the point of the design and the reason the corpus-level summary
+could never have detected the problem: both allocations are exactly balanced
+across the corpus. Only the per-speaker view separates them.
+
+The fix is a rotating balanced allocation — each speaker takes a contiguous
+block of the condition cycle, the cycle running on across speaker boundaries, so
+every speaker sees as many distinct conditions as they have recordings, no
+condition attaches preferentially to the speakers that sort early, and the
+corpus-wide counts are unchanged. The order within a speaker is then permuted,
+or condition would track chapter order instead.
+
+### Two models, and a control that matters more than it looks
+
+Both trained on the same 306 speakers, the same split, the same seed and the
+same code, differing in nothing but the allocation. The old model is included
+because it is the one §§9–18 report.
+
+| Model | Allocation | ψ₁ | ψ₂ | ψ₁/ψ₂ | dims above ψ = 0.1 |
+|---|---|---:|---:|---:|---:|
+| `ivec-plda-d5023efe82508a33` | global, pre-§19 stopping rule | 44.951 | 6.384 | 7.041 | 74 |
+| `ivec-plda-88c22044f3488bf5` | global, current code | 44.951 | 6.384 | 7.041 | 74 |
+| `ivec-plda-b31031b9e75e3d2c` | **stratified**, current code | **43.967** | 6.825 | **6.442** | 73 |
+
+**The control is the first two rows.** §19 replaced the PLDA stopping rule with
+the exact observed-data likelihood, so a retrain could have moved the spectrum
+for that reason alone and any comparison against the stored model would have
+confounded the two changes. It did not: the largest difference across all 100
+dimensions is **0.00075**, and the two models differ only in the last digits.
+Their model ids differ, because the id hashes every parameter and the run halted
+at a different iteration — which is exactly what §19 predicted and is the reason
+the control was run rather than assumed.
+
+So the third row is attributable to the allocation alone.
+
+### The confound is real, and it is not the explanation
+
+**ψ₁ falls by 0.98, which is 2.2%.** The ratio falls from 7.04 to 6.44, and the
+total between-speaker variance from 129.1 to 126.2. Halving the per-speaker
+channel offset — 1.42 kbit/s to 0.66 — and eliminating repeated conditions
+entirely removes about a fiftieth of the leading eigenvalue.
+
+**The spike is therefore not the condition confound.** A ψ₁ of 44 against a ψ₂
+of 6.4 is not a channel offset absorbed as speaker identity; whatever produces it
+survives an allocation designed to remove exactly that. The hypothesis §1 raised
+is refuted, and refuted by the measurement that was proposed to test it rather
+than argued away.
+
+The direction is right and the magnitude is not, which is the same shape as §18:
+a real defect in the experimental design that turns out to move almost nothing.
+Both are worth recording, because a method section that reports only the checks
+that changed something misrepresents how often careful checks come back negative.
+
+### What the spike might be instead
+
+Not established, and listed so the next attempt does not start from scratch:
+
+- **The corpus.** LibriSpeech chapters differ in microphone, room and recording
+  date, and a speaker's chapters are far more alike than two speakers' are. That
+  is a session effect rather than a channel effect, and the stratification here
+  does nothing to it because sessions are not assignable.
+- **Length normalisation.** The transform chain length-normalises before LDA,
+  which concentrates i-vectors on a sphere and can leave one dominant radial
+  direction that is not speaker-related.
+- **The speaker population.** 306 speakers is not many, and the leading
+  eigenvalue of a between-speaker scatter estimated from 306 draws in 100
+  dimensions is upward-biased by construction. A ratio of 7 may be partly an
+  estimation artefact rather than a structure in the data.
+
+The last of these is testable without new material — the bias falls with the
+speaker count, so the 125-speaker model should show a *larger* ratio than the
+306-speaker one if estimation noise is what drives it. §1's table says 5.13
+against 7.04, which is the wrong direction for that explanation and is the one
+piece of evidence currently available against it.
+
+### What this does not change
+
+**No reported result moves.** The stratified model is a new artefact and nothing
+in §§4–20 was computed with it. Whether it scores better is a separate question
+this section does not answer: it compares subspaces, not `C_llr_min`, and a
+paired evaluation over the 102 held-out speakers is what would settle it.
+
+**The allocation is now the default anyway.** It is more defensible than the one
+it replaces whether or not ψ₁ moved, and the old behaviour is retained behind
+`--condition-allocation global` because every model in §§4–18 was trained under
+it.
