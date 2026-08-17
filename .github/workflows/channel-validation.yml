@@ -8,6 +8,12 @@ name: Channel validation
 # It exists because the development machine has no ffmpeg build carrying AMR-NB,
 # which is why every absolute figure in docs/H1-acoustic-results.md is scoped
 # "through this parametric model". A GitHub runner has one an apt-get away.
+#
+# The tag trigger is the same deliberate act as pressing the button, expressed as
+# a push. It matters because the development environment cannot reach
+# api.github.com, so `gh workflow run` and the Actions tab are both unavailable
+# from where the work is done, while plain git over SSH is not. A tag named
+# channel-validation-* is never pushed by accident and never pushed twice.
 on:
   workflow_dispatch:
     inputs:
@@ -17,6 +23,9 @@ on:
       max_seconds:
         description: "Seconds of each recording"
         default: "30"
+  push:
+    tags:
+      - "channel-validation-*"
 
 # Needed to commit the report back. Contents is the only scope granted, and the
 # job writes exactly one file.
@@ -27,7 +36,12 @@ jobs:
   measure:
     runs-on: ubuntu-latest
     steps:
+      # main explicitly, not the triggering ref. A tag push checks out a detached
+      # head, and the report has to be committed back somewhere a clone will see
+      # it.
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - uses: actions/setup-python@v5
         with:
@@ -71,10 +85,33 @@ jobs:
           python -m scripts.validate_channel \
             --audio data/corpus/librispeech \
             --pattern '*.flac' \
-            --max-recordings ${{ inputs.max_recordings }} \
-            --max-seconds ${{ inputs.max_seconds }} \
+            --max-recordings "${{ inputs.max_recordings || '6' }}" \
+            --max-seconds "${{ inputs.max_seconds || '30' }}" \
             --output data/reports/channel_validation.json
           echo "status=$?" >> "$GITHUB_OUTPUT"
+
+      # The committed report is the only channel back to the development machine,
+      # which cannot reach api.github.com and therefore cannot read this log or
+      # download an artefact. A run that died before measuring anything must
+      # still leave something behind, or silence there is indistinguishable from
+      # a run that is merely slow.
+      - name: Record a failure the same way as a result
+        if: always()
+        run: |
+          if [ ! -f data/reports/channel_validation.json ]; then
+            mkdir -p data/reports
+            cat > data/reports/channel_validation.json <<JSON
+          {
+            "available": false,
+            "reached_measurement": false,
+            "measure_step_outcome": "${{ steps.measure.outcome }}",
+            "run": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "notes": [
+              "the workflow failed before writing a report; nothing was measured"
+            ]
+          }
+          JSON
+          fi
 
       # Committed rather than left as an artefact only. Downloading an artefact
       # and retyping a table is how a figure gets carried into a context it does
@@ -86,6 +123,7 @@ jobs:
       # Force-added by name: data/ is ignored so that evidence cannot reach the
       # history by accident, and one named report is not a reason to relax that.
       - name: Commit the report
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -97,6 +135,7 @@ jobs:
 
           Produced by the channel-validation workflow on a runner with
           libopencore-amrnb, which the development machine does not have."
+            git pull --rebase --autostash
             git push
           fi
 
