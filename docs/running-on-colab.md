@@ -164,6 +164,17 @@ ffmpeg package and the same `libopencore-amrnb`, the parametric coder is seeded,
 and the corpus selection is deterministic. Free runners are 2-core with a 6-hour
 cap — useless for a sweep, ample for a measurement that takes minutes.
 
+**Watch the monthly minute budget, because running out is silent from here.** A
+private repository gets 2,000 free Actions minutes a month, and each run of this
+workflow costs roughly ten to twenty of them — most of it fetching the corpus
+rather than measuring, which takes under three minutes for 48 recordings. When
+the budget is exhausted GitHub simply does not start the run, and from a machine
+that cannot reach `api.github.com` that is indistinguishable from a run that
+crashed or from one that is slow. If several tagged runs in a row commit
+nothing, check the billing page in a browser before assuming the workflow is
+broken: the report and the status file are both designed so that a run which
+*starts* always leaves something behind, so silence points upstream of the job.
+
 The report arrives as a commit rather than as a table to retype. That is
 deliberate: carrying a figure by hand from one context into another is how §12
 read a back-end training size as a whole training resource and how §14 ported a
