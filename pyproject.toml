@@ -198,7 +198,9 @@ no_implicit_reexport = true
 plugins = []
 
 [[tool.mypy.overrides]]
-module = ["scipy.*", "matplotlib.*", "hypothesis.*"]
+# speechbrain ships no py.typed marker. It is reached from exactly one module,
+# viflap/infrastructure/neural_extractor.py, and only through two calls.
+module = ["scipy.*", "matplotlib.*", "hypothesis.*", "speechbrain.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

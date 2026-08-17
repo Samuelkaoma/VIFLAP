@@ -54,7 +54,14 @@ ALLOWED_EXTERNAL: dict[str, frozenset[str]] = {
     "analysis": frozenset({"numpy", "scipy", "matplotlib"}),
     "evaluation": frozenset({"numpy", "scipy", "matplotlib"}),
     "application": frozenset({"numpy"}),
-    "infrastructure": frozenset({"numpy", "scipy", "sqlalchemy"}),
+    # torch and speechbrain are here and nowhere else, deliberately. A borrowed
+    # embedding extractor is an adapter to an external artefact: it loads a
+    # checkpoint from disk and depends on a deep learning framework, and both
+    # are things the analysis layer is forbidden. Admitting them to
+    # infrastructure keeps the science — which sample rate a checkpoint is
+    # defined against, and what feeding it anything else costs — in the layer
+    # that takes arrays and returns arrays.
+    "infrastructure": frozenset({"numpy", "scipy", "sqlalchemy", "torch", "speechbrain"}),
     "interfaces": frozenset({"numpy", "fastapi", "pydantic", "starlette", "uvicorn"}),
 }
 
