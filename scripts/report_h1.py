@@ -85,6 +85,24 @@ def render(payload: dict[str, Any]) -> str:
         f"training and calibration. Channel: **{', '.join(codec_modes)}**."
     )
     lines.append("")
+
+    # The back-end's health, beside the figures it produced. psi is the
+    # between-speaker variance in units of the within-speaker variance, so a
+    # dimension below the inert threshold separates people less well than it
+    # separates two recordings of one person, and the leading-to-second ratio is
+    # what a nuisance factor absorbed into the speaker subspace looks like.
+    # Neither was ever printed, which is how a model with 40 near-dead
+    # dimensions was reported as having 100 healthy ones.
+    if "plda_psi_1" in describe:
+        lines.append(
+            f"PLDA subspace: ψ₁ {describe['plda_psi_1']:.2f}, ψ₂ "
+            f"{describe['plda_psi_2']:.2f}, ratio "
+            f"**{describe['plda_psi_ratio']:.2f}**; "
+            f"{int(describe['plda_effective_dimension'])} of "
+            f"{int(describe['plda_dimension'])} dimensions above ψ = "
+            f"{describe.get('plda_inert_psi_threshold', 0.1):g}."
+        )
+        lines.append("")
     lines.append(
         "Intervals are 95% percentile bootstraps resampling **speakers**, not "
         "trials. `C_llr_min` is discrimination and decides H1; `C_llr (matched)` "
