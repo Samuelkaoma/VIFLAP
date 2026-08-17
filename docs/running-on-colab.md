@@ -164,16 +164,30 @@ ffmpeg package and the same `libopencore-amrnb`, the parametric coder is seeded,
 and the corpus selection is deterministic. Free runners are 2-core with a 6-hour
 cap — useless for a sweep, ample for a measurement that takes minutes.
 
-**Watch the monthly minute budget, because running out is silent from here.** A
-private repository gets 2,000 free Actions minutes a month, and each run of this
-workflow costs roughly ten to twenty of them — most of it fetching the corpus
-rather than measuring, which takes under three minutes for 48 recordings. When
-the budget is exhausted GitHub simply does not start the run, and from a machine
-that cannot reach `api.github.com` that is indistinguishable from a run that
-crashed or from one that is slow. If several tagged runs in a row commit
-nothing, check the billing page in a browser before assuming the workflow is
-broken: the report and the status file are both designed so that a run which
-*starts* always leaves something behind, so silence points upstream of the job.
+**A run takes far longer in wall time than it does in compute, so be patient
+before concluding anything.** Measuring 48 recordings takes under three minutes;
+a whole run took upwards of forty, and five tagged runs in a row appeared to
+commit nothing at all. They had not failed — they were queued behind each other
+and behind the corpus fetch, and every one of them eventually landed. The
+temptation at that point is to keep re-tagging, which lengthens the queue and
+makes the symptom worse.
+
+Two things make the diagnosis possible rather than guessed at. The status file
+carries the run id, so it differs on every run and is always committed, and the
+`log_tail` field carries the last forty lines of the measurement's own output.
+Between them, a committed status file means the job ran and says how it ended.
+
+**The monthly minute budget is the other thing that can stop a run, and running
+out of it *is* silent from here.** A private repository gets 2,000 free Actions
+minutes a month on the Free plan and 3,000 on Pro or Team, with public
+repositories unmetered on standard runners; Linux minutes count 1:1, Windows
+2:1, macOS 10:1. Each run of this workflow costs roughly ten to twenty, mostly
+fetching the corpus. There is no limit on how many *workflow files* a repository
+may have, and no per-run cap beyond the six-hour job timeout — the budget is
+minutes and storage, not workflows. When it is exhausted GitHub does not start
+the run at all, and nothing is committed. That is the one case the status file
+cannot cover, so if runs stop landing for good rather than slowly, the billing
+page is where to look.
 
 The report arrives as a commit rather than as a table to retype. That is
 deliberate: carrying a figure by hand from one context into another is how §12

@@ -2317,18 +2317,24 @@ both coders. Log-spectral distance between LPC envelopes against the source
 resampled to the same 8 kHz band, so the bandwidth reduction — a property of the
 channel rather than of either coder — is not charged to either.
 
-| Coder | Rate | LSD (dB) | Frames > 2 dB | seg. SNR (dB) | Delay |
+| Comparison | Rate | LSD (dB) | Frames > 2 dB | seg. SNR (dB) | Delay |
 |---|---:|---:|---:|---:|---:|
-| **reference AMR-NB** | 12.20 | **3.22** | 87.6% | 2.18 | 39.3 |
-| parametric model | 12.20 | **6.79** | 99.3% | 3.99 | 0.0 |
-| **reference AMR-NB** | 4.75 | **5.71** | 99.8% | 1.27 | 39.3 |
-| parametric model | 4.75 | **8.57** | 100.0% | 1.71 | 0.0 |
+| **reference AMR-NB** vs source | 12.20 | **3.22** | 87.6% | 2.18 | 39.3 |
+| parametric model vs source | 12.20 | **6.79** | 99.3% | 3.98 | 0.0 |
+| model vs reference | 12.20 | **6.93** | 99.9% | 1.59 | 0.0 |
+| **reference AMR-NB** vs source | 4.75 | **5.71** | 99.8% | 1.27 | 39.3 |
+| parametric model vs source | 4.75 | **8.57** | 100.0% | 1.71 | 0.0 |
+| model vs reference | 4.75 | **7.78** | 100.0% | −0.15 | 0.0 |
 
 The figures are stable in the sample size, which is worth stating because the
 first successful run measured six recordings from six speakers and this one
 measured eight times as many across sixteen: 3.28 → 3.22 and 6.63 → 6.79 at
 12.2 kbit/s. Whatever these numbers are limited by, it is not how many
 recordings went into them.
+
+The third row of each pair is the one this measurement exists for, and it is
+reported only now because the first version of it was misaligned — see the
+caveats below, where the defect and its symptom are recorded.
 
 **The model is about twice as harsh as the coder it models**, not six times.
 §16 set its 6.6 dB against a standards criterion of roughly 1 dB and concluded
@@ -2353,34 +2359,62 @@ coder's, and `C_llr_min` still barely responds at 30 seconds. §5's own
 explanation — that with enough frames the i-vector averages away coarser
 spectral quantisation, and at 5 seconds it cannot — is what is left standing.
 
+**The two coders are not the same distortion at different strengths.** This is
+the reading the coder-against-coder row supplies and neither of the other two
+can. If the model were simply the reference plus more of the same, the distance
+between them would be roughly the difference of their distances from the source
+— 6.79 − 3.22 = 3.57 dB at 12.2 kbit/s. It is **6.93 dB**, slightly *larger*
+than the model's own distance from the source, and close to the quadrature sum
+of the two, √(6.79² + 3.22²) = 7.51.
+
+That is the signature of two distortions that are close to independent rather
+than aligned. The model is not a harsher AMR-NB; it is a different displacement
+of the spectral envelope, of comparable size to the reference's and pointing
+somewhere else. §16 reached the right suspicion by the wrong route in saying the
+distortion comes from the excitation model rather than from the LSF quantiser
+the bitrate label names — this is the evidence for it, because an excitation
+substituted wholesale moves the envelope in a direction an analysis-by-synthesis
+search never would.
+
+It also sharpens what "pessimistic" can mean for the rest of the document. A
+system trained and evaluated through a channel that is *differently* wrong,
+rather than *more* wrong, need not be uniformly worse than one through the
+reference. Whether it is remains the unmeasured half of §16's request.
+
 ### What is not yet reliable in this table, and is recorded rather than trimmed
 
-**The coder-against-coder rows are omitted, because they were misaligned.** They
-are the rows the whole measurement exists to produce, and they were wrong.
-`estimate_delay` searches non-negative lags only, on the physical ground that a
-codec delays its output rather than anticipating its input. That holds for a
-coder against its source and fails for one coder against the other: this model
-returns its output aligned with the input while AMR delays by about 40 samples,
-so the model's signal *leads* and the estimator cannot express it. Asked for a
-non-negative lag it returns the best one available, which is noise — the run
-above reports a mean delay of 39 samples with a **maximum of 192** on a
-comparison whose true offset is a constant −40.
+**The coder-against-coder rows were wrong the first time they were measured**,
+and they are the rows the whole measurement exists to produce. `estimate_delay`
+searches non-negative lags only, on the physical ground that a codec delays its
+output rather than anticipating its input. That holds for a coder against its
+source and fails for one coder against the other: this model returns its output
+aligned with the input while AMR delays by about 40 samples, so the model's
+signal *leads* and the estimator cannot express it. Asked for a non-negative lag
+it returns the best one available, which is noise — the first run of this table
+reported a mean delay of 39 samples with a **maximum of 192** on a comparison
+whose true offset is a constant −40.
 
 That was visible only because the delay is recorded per comparison, which is
 exactly what that field was put there for. Both coded signals are now aligned to
-the band-matched source they share before being compared with each other, and a
-rerun supersedes those rows.
+the band-matched source they share before being compared with each other, and
+the corrected rows report a residual delay of **zero** on every recording, which
+is the check that the alignment worked.
 
-The two rows against the source are unaffected: each coder is compared with its
-own input, where the non-negative rule is correct, and both report a delay
-consistent to within a sample across all 48 recordings.
+The size of the correction is worth recording. At 12.2 kbit/s the
+model-against-reference figures moved from 7.97 dB and a segmental SNR of
+**−1.87 dB** to 6.93 dB and **+1.59 dB**. A negative segmental SNR means the
+error signal carried more energy than the speech, which is what five
+milliseconds of offset looks like and is not what either coder does. The rows
+against the source never had the problem — each coder is compared with its own
+input, where the non-negative rule is correct — and they are unchanged.
 
-**Segmental SNR should not be read across coders yet.** The reference reads
-*lower* than the model (2.18 against 3.99 dB) while distorting the envelope
-half as much. Delay is estimated to the sample, and a residual sub-sample offset
-depresses a phase-sensitive measure while leaving an envelope measure alone, so
-the most likely reading is that the reference's 39-sample alignment is not being
-removed exactly. Log-spectral distance is the figure to take from this table.
+**Segmental SNR is still the weaker of the two figures.** The reference reads
+*lower* than the model against the source (2.18 against 3.98 dB) while
+distorting the envelope half as much, and its 39-sample delay is removed only to
+the nearest sample, so a residual sub-sample offset would depress a
+phase-sensitive measure while leaving an envelope measure alone. Log-spectral
+distance is the figure to take from this table; segmental SNR is corroborative
+where the two agree, which after the alignment fix they now do.
 
 **One recording per speaker per condition, and one corpus.** LibriSpeech read
 speech, not telephony, and the material is the one caveat this measurement
