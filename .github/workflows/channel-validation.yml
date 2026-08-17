@@ -126,6 +126,7 @@ jobs:
       # thing only — the job never reached this step.
       - name: Record what this run actually did
         if: always()
+        continue-on-error: true
         run: |
           mkdir -p data/reports
           MEASURE_STATUS="${{ steps.measure.outputs.status }}" \
@@ -179,8 +180,12 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f data/reports/channel_validation.json
-          git add -f data/reports/channel_validation_status.json
+          # Tolerant per file. `git add` on a path that does not exist fails the
+          # whole step, and this step failing is precisely the outcome that
+          # leaves the development machine with nothing to look at.
+          for report in channel_validation channel_validation_status; do
+            git add -f "data/reports/$report.json" || echo "no $report.json to add"
+          done
           if git diff --cached --quiet; then
             echo "nothing to commit, which should now be impossible"
           else
