@@ -77,6 +77,14 @@ SPEECH_FLOOR_FRACTION = 1e-4
 #: limited by the grid.
 N_FFT = 512
 
+#: Exit status when the run completed but no reference coder was available.
+#: A measured result, not a failure, and it must be distinguishable from one:
+#: an uncaught exception exits 1, so 1 is left alone.
+NO_REFERENCE_CODER = 3
+
+#: Exit status when there was nothing to measure.
+NO_AUDIO = 2
+
 
 @dataclass(slots=True)
 class PairwiseDistortion:
@@ -524,7 +532,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"no audio matching {arguments.pattern} under {arguments.audio}",
             file=sys.stderr,
         )
-        return 2
+        return NO_AUDIO
 
     import soundfile as sf
 
@@ -532,7 +540,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     signals = load_audio(paths, arguments.max_seconds)
     if not signals:
         print("every candidate recording was silent", file=sys.stderr)
-        return 2
+        return NO_AUDIO
 
     print(f"measuring {len(signals)} recordings from {arguments.audio}", flush=True)
     report = run(signals, sample_rate, arguments.bitrates, seed=arguments.seed)
@@ -555,7 +563,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # A non-zero exit when no reference coder exists, so an automated run cannot
     # be mistaken for a successful validation by anything reading exit codes.
-    return 0 if report.available else 1
+    # Deliberately not 1: an uncaught exception also exits 1, and the two are
+    # opposite outcomes — "ran correctly and found no encoder" against "did not
+    # run". A workflow reading this from a machine that cannot see its log has
+    # no other way to tell them apart, and for two runs it could not.
+    return 0 if report.available else NO_REFERENCE_CODER
 
 
 if __name__ == "__main__":

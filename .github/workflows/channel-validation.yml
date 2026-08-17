@@ -146,11 +146,13 @@ jobs:
                       "measure_exit_status": status or "step did not reach its exit",
                       "measure_step_outcome": os.environ.get("MEASURE_OUTCOME", ""),
                       "job_status_so_far": os.environ.get("JOB_STATUS", ""),
-                      # 0 measured against a reference coder, 1 found no encoder
-                      # and said so. Anything else is a crash, and the tail is
-                      # the only way to see it from a machine that cannot read
-                      # this job's log.
-                      "measurement_succeeded": status in {"0", "1"},
+                      # 0 measured against a reference coder, 3 ran correctly
+                      # and found no encoder. Anything else is a crash — 1 in
+                      # particular, which is what an uncaught exception exits
+                      # with, and which is why "no encoder" is not 1. The tail
+                      # is the only way to see the difference from a machine
+                      # that cannot read this job's log.
+                      "measurement_succeeded": status in {"0", "3"},
                       "log_tail": log.read_text(encoding="utf-8", errors="replace")
                       .splitlines()[-40:]
                       if log.exists()

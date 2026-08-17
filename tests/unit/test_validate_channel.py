@@ -16,9 +16,12 @@ import numpy as np
 import pytest
 
 from scripts.validate_channel import (
+    NO_AUDIO,
+    NO_REFERENCE_CODER,
     align_to,
     compare,
     estimate_delay,
+    main,
     probe_ffmpeg,
     select_recordings,
 )
@@ -193,6 +196,25 @@ class TestSelectRecordings:
 
     def test_an_empty_corpus_selects_nothing_rather_than_failing(self, tmp_path) -> None:
         assert select_recordings(tmp_path, "*.flac", 6) == []
+
+
+class TestExitStatus:
+    """ "Ran and found no encoder" and "did not run" must not share a code.
+
+    They are opposite outcomes and Python exits 1 for an uncaught exception, so
+    the script cannot also use 1 for the first. Two workflow runs crashed inside
+    the measurement and were indistinguishable from a clean run that found no
+    encoder, on a machine that cannot read the job log.
+    """
+
+    def test_no_reference_coder_is_not_the_interpreter_failure_code(self) -> None:
+        assert NO_REFERENCE_CODER != 1
+        assert NO_AUDIO != 1
+        assert NO_REFERENCE_CODER != NO_AUDIO
+        assert NO_REFERENCE_CODER != 0
+
+    def test_an_empty_corpus_reports_having_nothing_to_measure(self, tmp_path) -> None:
+        assert main(["--audio", str(tmp_path), "--pattern", "*.flac"]) == NO_AUDIO
 
 
 class TestProbeFfmpeg:
