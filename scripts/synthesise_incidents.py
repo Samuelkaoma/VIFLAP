@@ -103,6 +103,30 @@ PARAMETER_PROVENANCE: dict[str, str] = {
     "inter_call_timing": "ASSUMED, beyond call-centre working hours.",
     "code_switching_rate": "ASSUMED. Bemba/Nyanja/English mixing is real; the rate is not measured.",
     "idiolect_parameters": "ASSUMED throughout. Nothing here is evidence about any person.",
+    "calls_per_incident": (
+        "ASSUMED. An incident arrives as a set of call detail records rather "
+        "than one call, because a rhythm cannot be estimated from one call and "
+        "TemporalComparator refuses below three. The number is not measured."
+    ),
+    "operator_shift_hour": (
+        "ASSUMED. Call-centre working hours are grounded; that an individual "
+        "operator keeps to a preferred hour within them is not, and it is what "
+        "gives the temporal stream any operator-level signal at all."
+    ),
+    "imei_pool_and_handset_binding": (
+        "ASSUMED. The SIM pool's scale is grounded; that operators keep to a "
+        "preferred handset within an operation's pool is not."
+    ),
+    "cell_sites": (
+        "ASSUMED. That the Lusaka operation worked from one premises is "
+        "grounded, so few cells is the right shape; the identifiers and their "
+        "number are invented."
+    ),
+    "mobile_money_agent_popularity": (
+        "ASSUMED. That agent volumes are heavily skewed is the premise the "
+        "transactional stream's rarity weighting rests on and is plausible, but "
+        "no Zambian agent-volume distribution was found to fit it to."
+    ),
 }
 
 MOBILE_MONEY_OPERATORS: tuple[tuple[str, float], ...] = (
@@ -152,6 +176,12 @@ class Operator:
     marker_weights: dict[str, float]
     words_per_utterance: float
     disfluency_rate: float
+    shift_start_hour: int = 8
+    """The hour this operator tends to start work. Grounded only in that the
+    operation keeps call-centre hours; the individual preference within them is
+    assumed, and it is the sole reason the temporal stream carries any
+    operator-level signal here rather than being purely operation-level."""
+
     acoustic_speaker_id: str | None = None
     """Which real corpus speaker supplies this operator's audio, when the
     acoustic stream is filled from real recordings rather than simulated. Left
@@ -170,11 +200,53 @@ class Operation:
     handset_models: tuple[str, ...]
     typical_amount_zmw: float
     operator_ids: tuple[str, ...]
+    imei_pool: tuple[str, ...] = ()
+    """Handsets the operation drives its SIM pool through. Held at operation
+    level because that is where the Lusaka case puts it — the simboxes were the
+    operation's, not any operator's."""
+
+    handset_by_imei: dict[str, str] = field(default_factory=dict)
+    """Model of each handset in the pool. A handset has one model, so drawing
+    the two independently would produce a corpus in which the same IMEI reports
+    different models across incidents and the device stream's two components
+    contradict each other."""
+
+    cell_sites: tuple[str, ...] = ()
+    """Cells the operation's traffic originates from. Small, because the Lusaka
+    case was one building: location is operation-level evidence here, and the
+    device stream should be seen to treat it that way."""
+
+    agent_ids: tuple[str, ...] = ()
+    agent_weights: tuple[float, ...] = ()
+    """Mobile-money agents the operation cashes out through, and how its volume
+    is spread over them. Heavily skewed, because a uniform spread would make
+    every shared agent equally informative and the rarity weighting the
+    transactional stream is built on would have nothing to weigh."""
+
+
+@dataclass(slots=True)
+class CallDetail:
+    """One call record. An incident carries several; a rhythm needs more than one."""
+
+    timestamp: str
+    duration_seconds: float
+    direction: str = "outbound"
+
+
+@dataclass(slots=True)
+class TransactionDetail:
+    """One mobile-money movement, with the counterparties that make it evidence."""
+
+    timestamp: str
+    amount_zmw: float
+    transaction_type: str
+    agent_id: str
+    counterparty_wallet: str
 
 
 @dataclass(slots=True)
 class Incident:
-    """One call, by one operator, running one operation."""
+    """One episode, by one operator, running one operation."""
 
     incident_id: str
     operation_id: str
@@ -185,10 +257,29 @@ class Incident:
     msisdn: str
     imei: str
     handset_model: str
+    cell_site: str
     mobile_money_operator: str
-    transactions_zmw: list[float]
+    calls: list[CallDetail]
+    transactions: list[TransactionDetail]
     is_fraudulent: bool
     notes: list[str] = field(default_factory=list)
+
+
+#: Movement types a cash-out sequence runs through.
+TRANSACTION_TYPES: tuple[str, ...] = (
+    "deposit",
+    "transfer_out",
+    "cash_out",
+    "airtime_purchase",
+)
+
+HANDSET_MODELS: tuple[str, ...] = (
+    "itel A56",
+    "Tecno Spark 8",
+    "Samsung A04",
+    "Nokia 105",
+    "Infinix Hot 11",
+)
 
 
 def _draw_operator(rng: np.random.Generator, index: int) -> Operator:
@@ -200,6 +291,7 @@ def _draw_operator(rng: np.random.Generator, index: int) -> Operator:
         marker_weights=dict(zip(DISCOURSE_MARKERS, weights.tolist(), strict=True)),
         words_per_utterance=float(rng.normal(11.0, 2.5)),
         disfluency_rate=float(rng.uniform(0.02, 0.09)),
+        shift_start_hour=int(rng.integers(7, 15)),
     )
 
 
@@ -224,6 +316,24 @@ def _draw_operation(
     n_operators = int(rng.integers(2, min(5, len(operators)) + 1))
     assigned = rng.choice(len(operators), size=n_operators, replace=False)
 
+    models = tuple(
+        rng.choice(HANDSET_MODELS, size=int(rng.integers(1, 4)), replace=False).tolist()
+    )
+    imei_pool = tuple(
+        f"35{int(rng.integers(10**12, 10**13 - 1))}"
+        for _ in range(int(rng.integers(3, 8)))
+    )
+    # One model per handset, fixed here rather than redrawn per incident. A
+    # corpus in which one IMEI reports several models would let the device
+    # stream's two components disagree about the same object.
+    handset_by_imei = {imei: str(rng.choice(models)) for imei in imei_pool}
+
+    n_agents = int(rng.integers(4, 10))
+    # Concentration well below one: most volume through one or two agents, with
+    # a long tail of rare ones. The rare ones are what the Dirichlet-multinomial
+    # is supposed to reward, and a flat spread would never exercise it.
+    weights = rng.dirichlet(np.full(n_agents, 0.35))
+
     return Operation(
         operation_id=f"opn{index:03d}",
         move_order=tuple(order),
@@ -232,15 +342,16 @@ def _draw_operation(
             f"26097{int(rng.integers(1000000, 9999999))}"
             for _ in range(int(rng.integers(8, 25)))
         ),
-        handset_models=tuple(
-            rng.choice(
-                ["itel A56", "Tecno Spark 8", "Samsung A04", "Nokia 105", "Infinix Hot 11"],
-                size=int(rng.integers(1, 4)),
-                replace=False,
-            ).tolist()
-        ),
+        handset_models=models,
         typical_amount_zmw=float(rng.lognormal(mean=5.6, sigma=0.7)),
         operator_ids=tuple(operators[int(i)].operator_id for i in assigned),
+        imei_pool=imei_pool,
+        handset_by_imei=handset_by_imei,
+        cell_sites=tuple(
+            f"LSK-{int(rng.integers(1000, 9999))}" for _ in range(int(rng.integers(1, 4)))
+        ),
+        agent_ids=tuple(f"AG{index:02d}{slot:03d}" for slot in range(n_agents)),
+        agent_weights=tuple(weights.tolist()),
     )
 
 
@@ -270,6 +381,68 @@ def _utterance(rng: np.random.Generator, operator: Operator, move: str) -> str:
     return " ".join(out)
 
 
+def _draw_calls(
+    rng: np.random.Generator, operator: Operator, started: datetime, duration: float
+) -> list[CallDetail]:
+    """The incident's own call, plus the operator's activity around it.
+
+    An incident arrives as call detail records rather than as one call, and it
+    has to: ``TemporalComparator`` refuses below three calls, on the stated
+    ground that a rhythm cannot be estimated from a handful of records. A
+    generator emitting one call per incident can only ever exercise that
+    refusal.
+
+    The surrounding calls cluster on the operator's preferred hour, which is
+    what makes hour-of-day evidence discriminate between two people working the
+    same operation. Grounding for that preference is thin — see
+    ``operator_shift_hour`` in :data:`PARAMETER_PROVENANCE`.
+    """
+    calls = [
+        CallDetail(timestamp=started.isoformat(), duration_seconds=round(duration, 1))
+    ]
+    for _ in range(int(rng.integers(3, 9))):
+        hour = (operator.shift_start_hour + int(rng.integers(0, 4))) % 24
+        stamp = started.replace(hour=hour, minute=int(rng.integers(0, 60))) + timedelta(
+            days=int(rng.integers(-2, 3))
+        )
+        calls.append(
+            CallDetail(
+                timestamp=stamp.isoformat(),
+                duration_seconds=round(float(rng.lognormal(mean=4.9, sigma=0.5)), 1),
+            )
+        )
+    calls.sort(key=lambda call: call.timestamp)
+    return calls
+
+
+def _draw_transactions(
+    rng: np.random.Generator, operation: Operation, started: datetime
+) -> list[TransactionDetail]:
+    """The cash-out sequence, through agents drawn on the operation's skew."""
+    weights = np.array(operation.agent_weights)
+    n_transactions = int(rng.integers(2, 6))
+    transactions: list[TransactionDetail] = []
+    for slot in range(n_transactions):
+        agent = operation.agent_ids[int(rng.choice(len(operation.agent_ids), p=weights))]
+        transactions.append(
+            TransactionDetail(
+                timestamp=(
+                    started + timedelta(minutes=int(rng.integers(2, 90)) * (slot + 1))
+                ).isoformat(),
+                amount_zmw=round(
+                    float(rng.lognormal(np.log(operation.typical_amount_zmw), 0.5)), 2
+                ),
+                transaction_type=str(rng.choice(TRANSACTION_TYPES)),
+                agent_id=agent,
+                # Money moves onto the operation's own numbers, so counterparty
+                # wallets recur across its incidents and are evidence about the
+                # operation rather than noise.
+                counterparty_wallet=str(rng.choice(list(operation.sim_pool))),
+            )
+        )
+    return transactions
+
+
 def generate(
     n_operators: int = 12,
     n_operations: int = 6,
@@ -282,40 +455,49 @@ def generate(
     by_id = {operator.operator_id: operator for operator in operators}
     operations = [_draw_operation(rng, i, operators) for i in range(n_operations)]
 
+    # Which handset each operator habitually picks up within each operation.
+    # Fixed once per pairing rather than redrawn per incident: a handset that
+    # changed hands every call would leave the device stream with no repeated
+    # IMEI to find, which is the one observation it treats as strong.
+    preferred: dict[tuple[str, str], str] = {
+        (operation.operation_id, operator_id): str(rng.choice(list(operation.imei_pool)))
+        for operation in operations
+        for operator_id in operation.operator_ids
+    }
+
     incidents: list[Incident] = []
     start = datetime(2026, 3, 2, 8, 0, tzinfo=UTC)
     for operation in operations:
         for index in range(incidents_per_operation):
             operator = by_id[str(rng.choice(list(operation.operator_ids)))]
             # Call-centre working hours: the one temporal feature with any
-            # grounding. The within-day pattern is assumed.
-            offset = timedelta(
-                days=int(rng.integers(0, 21)),
-                hours=int(rng.integers(0, 9)),
-                minutes=int(rng.integers(0, 60)),
+            # grounding. The hour within them is the operator's habit and is not.
+            started = (start + timedelta(days=int(rng.integers(0, 21)))).replace(
+                hour=(operator.shift_start_hour + int(rng.integers(0, 4))) % 24,
+                minute=int(rng.integers(0, 60)),
             )
+            duration = float(rng.lognormal(mean=4.9, sigma=0.5))
             transcript = " . ".join(
                 _utterance(rng, operator, move) for move in operation.move_order
             )
+            imei = preferred[(operation.operation_id, operator.operator_id)]
+            if rng.random() < 0.2:
+                imei = str(rng.choice(list(operation.imei_pool)))
             incidents.append(
                 Incident(
                     incident_id=f"{operation.operation_id}-{index:02d}",
                     operation_id=operation.operation_id,
                     operator_id=operator.operator_id,
-                    started_at=(start + offset).isoformat(),
-                    duration_seconds=float(rng.lognormal(mean=4.9, sigma=0.5)),
+                    started_at=started.isoformat(),
+                    duration_seconds=duration,
                     transcript=transcript,
                     msisdn=str(rng.choice(list(operation.sim_pool))),
-                    imei=f"35{int(rng.integers(10**12, 10**13 - 1))}",
-                    handset_model=str(rng.choice(list(operation.handset_models))),
+                    imei=imei,
+                    handset_model=operation.handset_by_imei[imei],
+                    cell_site=str(rng.choice(list(operation.cell_sites))),
                     mobile_money_operator=operation.mobile_money_operator,
-                    transactions_zmw=[
-                        round(
-                            float(rng.lognormal(np.log(operation.typical_amount_zmw), 0.5)),
-                            2,
-                        )
-                        for _ in range(int(rng.integers(1, 4)))
-                    ],
+                    calls=_draw_calls(rng, operator, started, duration),
+                    transactions=_draw_transactions(rng, operation, started),
                     is_fraudulent=True,
                 )
             )
