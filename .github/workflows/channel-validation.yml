@@ -17,9 +17,13 @@ name: Channel validation
 on:
   workflow_dispatch:
     inputs:
+      # These defaults apply to the button only. A tag push carries no inputs,
+      # so the `||` fallbacks in the measure step are what a tagged run uses,
+      # and the two have to be kept in step — the third run measured six
+      # recordings rather than twenty-four because only this one was raised.
       max_recordings:
         description: "Recordings to measure"
-        default: "24"
+        default: "48"
       max_seconds:
         description: "Seconds of each recording"
         default: "30"
@@ -84,7 +88,7 @@ jobs:
       - name: Fetch a minimal speech sample
         run: |
           python -m scripts.fetch_corpus \
-            --max-speakers 8 \
+            --max-speakers 16 \
             --chapters-per-speaker 2 \
             --utterances-per-chapter 6
 
@@ -99,7 +103,7 @@ jobs:
           python -m scripts.validate_channel \
             --audio data/corpus/librispeech \
             --pattern '*.flac' \
-            --max-recordings "${{ inputs.max_recordings || '6' }}" \
+            --max-recordings "${{ inputs.max_recordings || '48' }}" \
             --max-seconds "${{ inputs.max_seconds || '30' }}" \
             --output data/reports/channel_validation.json
           echo "status=$?" >> "$GITHUB_OUTPUT"
