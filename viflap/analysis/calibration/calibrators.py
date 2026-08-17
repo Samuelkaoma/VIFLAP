@@ -53,7 +53,11 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import minimize
 
-from viflap.analysis.calibration.elub import EmpiricalBounds, empirical_bounds
+from viflap.analysis.calibration.elub import (
+    EmpiricalBounds,
+    apply_bounds,
+    empirical_bounds,
+)
 from viflap.analysis.calibration.pav import pool_adjacent_violators
 from viflap.domain.errors import (
     CalibrationError,
@@ -68,6 +72,7 @@ __all__ = [
     "IsotonicCalibrator",
     "KernelDensityCalibrator",
     "LogisticCalibrator",
+    "as_reported",
 ]
 
 _LN2 = float(np.log(2.0))
@@ -112,6 +117,11 @@ class Calibrator(Protocol):
 
     @property
     def calibrator_id(self) -> str: ...
+
+    @property
+    def bounds(self) -> EmpiricalBounds:
+        """The empirical bounds fitted on the development set."""
+        ...
 
     def fit(self, scores: NDArray[np.float64], labels: NDArray[np.int64]) -> Calibrator: ...
 
@@ -194,6 +204,30 @@ class _BaseCalibrator:
             was_bounded=bounded != unbounded,
             calibrator_id=self.calibrator_id,
         )
+
+
+def as_reported(calibrator: Calibrator, scores: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Calibrated log-LRs for an array, as the system would actually report them.
+
+    The array form of :meth:`Calibrator.calibrate`, and the only form any script
+    measuring ``C_llr`` should use. :meth:`Calibrator.transform` is the raw
+    mapping and is not what a deployment emits: ``calibrate`` additionally clips
+    to the empirical bounds fitted on the development set, and that clip is
+    load-bearing rather than cosmetic — it is what stops a calibration
+    extrapolating past the strength its validation data can support.
+
+    Measuring ``transform`` and calling the result ``C_llr`` answers a question
+    nobody asked, because it scores a mapping that never reaches a report. The
+    difference is not small: on this corpus the unbounded figure overstates
+    calibration loss by roughly a factor of three and makes a kernel-density
+    calibrator look catastrophic where its bounded form is competitive.
+
+    This lives here, rather than in each script that needs it, because two
+    scripts computing "the reported likelihood ratio" by two routes is how
+    ``data/reports/calibrator_comparison.json`` came to hold unbounded values
+    under a schema the results document reads as bounded ones.
+    """
+    return apply_bounds(calibrator.transform(scores), calibrator.bounds)
 
 
 class LogisticCalibrator(_BaseCalibrator):

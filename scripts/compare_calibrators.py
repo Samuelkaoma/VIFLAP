@@ -21,6 +21,38 @@ same evaluation trials, so the only thing that varies is the mapping.
 any monotonic transformation — which makes it the control: if it moves, something
 is wrong with the experiment rather than interesting about the calibrators.
 
+Both columns are persisted, and the first version persisted the wrong one
+------------------------------------------------------------------------
+This script originally scored ``calibrator.transform`` — the raw mapping, before
+empirical bounding — and wrote it to the report under the field name ``c_llr``.
+The results document quotes the *bounded* figures, which are the ones a
+deployment emits and which had been recomputed by hand: 0.416 / 0.426 / 0.420 at
+12.2 kbit/s clean and 30 s, against the 0.603 / 0.451 / 9.929 the artefact held.
+The document was right and the artefact was not, which is the worse way round —
+an examiner opening the JSON would reasonably conclude the numbers had been
+edited rather than measured.
+
+Both are now computed, by the same ``as_reported`` helper ``evaluate_h1.py``
+uses, so the two scripts cannot disagree about what "the reported likelihood
+ratio" means. ``c_llr`` is the bounded, as-reported quantity throughout;
+``c_llr_unbounded`` is retained beside it for diagnosis, as §15 asks.
+
+The clip is also measured rather than left implicit
+---------------------------------------------------
+§15 established that the bound is doing most of the work: at the best cell it
+replaces the reported likelihood ratio for 60.6% of trials and removes 72% of
+the calibration loss. So the clipped fraction is recorded per calibrator, split
+by class, and so are the bounds themselves.
+
+That last field settles a question §5 raised and could not answer from its own
+output. ``empirical_bounds`` is computed from a PAV fit, which reads only the
+*rank order* of the scores. A logistic map is affine-increasing and an isotonic
+map is monotone, so both preserve that order and both must produce identical
+bounds. Recording the bounds makes the identity visible in the artefact instead
+of being an argument in prose — and it is why three calibrator families landing
+within 0.01 of each other post-clip is close to a mathematical necessity rather
+than a finding about calibration.
+
 Scores are written to disk
 --------------------------
 Every per-trial score is saved alongside the report. Regenerating them costs a
@@ -38,7 +70,7 @@ import json
 import sys
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
@@ -47,9 +79,11 @@ from numpy.typing import NDArray
 from scripts.corpus import materialise, scan_corpus, split_by_speaker
 from scripts.experiment import build_trials, degrade_many, embed_many
 from viflap.analysis.calibration.calibrators import (
+    Calibrator,
     IsotonicCalibrator,
     KernelDensityCalibrator,
     LogisticCalibrator,
+    as_reported,
 )
 from viflap.analysis.calibration.metrics import compute_cllr, compute_cllr_min
 from viflap.analysis.channel.degradation import DegradationCondition, NoiseType
@@ -75,7 +109,12 @@ CALIBRATORS: dict[str, type] = {
 
 @dataclass(slots=True)
 class CalibratorResult:
-    """One calibrator's cost on one cell."""
+    """One calibrator's cost on one cell.
+
+    ``c_llr`` is the as-reported, bounded quantity everywhere in this project.
+    The unbounded companion is a diagnostic and is named so that it cannot be
+    mistaken for the other.
+    """
 
     name: str
     calibrator_id: str
@@ -83,6 +122,25 @@ class CalibratorResult:
     c_llr_lower: float | None
     c_llr_upper: float | None
     calibration_loss: float | None
+
+    c_llr_unbounded: float | None = None
+    calibration_loss_unbounded: float | None = None
+
+    #: Share of evaluation trials whose reported log-LR is the bound rather than
+    #: the calibration's own output, overall and by class. The asymmetry is the
+    #: finding: §15 measured 61.5% of different-source against 3.0% of
+    #: same-source, so the bound is almost entirely capping how negative the
+    #: report may go.
+    clipped_fraction: float | None = None
+    clipped_fraction_different_source: float | None = None
+    clipped_fraction_same_source: float | None = None
+
+    #: The bounds themselves, base 10. Identical between any two calibrators
+    #: whose maps preserve the score order, which is most of why the families
+    #: agree post-clip.
+    lower_log10_lr: float | None = None
+    upper_log10_lr: float | None = None
+
     note: str = ""
 
 
@@ -116,11 +174,14 @@ def evaluate_calibrators(
             )
             continue
 
-        calibrated = calibrator.transform(eval_scores)
+        unbounded = calibrator.transform(eval_scores)
+        bounded = as_reported(calibrator, eval_scores)
+        clip = _clipping(calibrator, unbounded, bounded, eval_labels)
+
         try:
             estimate = bootstrap_over_speakers(
                 compute_cllr,
-                calibrated,
+                bounded,
                 eval_labels,
                 eval_speakers,
                 n_resamples=n_resamples,
@@ -134,11 +195,14 @@ def evaluate_calibrators(
                     c_llr_lower=None,
                     c_llr_upper=None,
                     calibration_loss=None,
+                    c_llr_unbounded=compute_cllr(unbounded, eval_labels),
                     note=f"no interval: {exc.message}",
+                    **clip,
                 )
             )
             continue
 
+        c_llr_unbounded = compute_cllr(unbounded, eval_labels)
         results.append(
             CalibratorResult(
                 name=name,
@@ -147,9 +211,36 @@ def evaluate_calibrators(
                 c_llr_lower=estimate.lower,
                 c_llr_upper=estimate.upper,
                 calibration_loss=estimate.value - c_llr_min,
+                c_llr_unbounded=c_llr_unbounded,
+                calibration_loss_unbounded=c_llr_unbounded - c_llr_min,
+                **clip,
             )
         )
     return c_llr_min, results
+
+
+def _clipping(
+    calibrator: Calibrator,
+    unbounded: NDArray[np.float64],
+    bounded: NDArray[np.float64],
+    labels: NDArray[np.int64],
+) -> dict[str, float]:
+    """How much of the report is the bound rather than the calibration."""
+    clipped = unbounded != bounded
+    same = labels == 1
+    different = labels == 0
+    bounds = calibrator.bounds
+    return {
+        "clipped_fraction": float(np.mean(clipped)),
+        "clipped_fraction_different_source": float(np.mean(clipped[different]))
+        if different.any()
+        else 0.0,
+        "clipped_fraction_same_source": float(np.mean(clipped[same]))
+        if same.any()
+        else 0.0,
+        "lower_log10_lr": bounds.lower_log10,
+        "upper_log10_lr": bounds.upper_log10,
+    }
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -239,26 +330,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "evaluable": True,
                     "c_llr_min": c_llr_min,
                     "n_evaluation_speakers": eval_trials.n_speakers,
-                    "calibrators": [
-                        {
-                            "name": r.name,
-                            "calibrator_id": r.calibrator_id,
-                            "c_llr": r.c_llr,
-                            "c_llr_lower": r.c_llr_lower,
-                            "c_llr_upper": r.c_llr_upper,
-                            "calibration_loss": r.calibration_loss,
-                            "note": r.note,
-                        }
-                        for r in results
-                    ],
+                    "calibrators": [asdict(r) for r in results],
                 }
             )
+            # Bounded first and unbounded in parentheses, always together. The
+            # figure that matters operationally is the bounded one; printing it
+            # alone is how the difference between the two stopped being visible.
             summary = "  ".join(
-                f"{r.name}={r.c_llr:.3f}" if r.c_llr is not None else f"{r.name}=n/a"
+                f"{r.name}={r.c_llr:.3f}({r.c_llr_unbounded:.3f})"
+                if r.c_llr is not None and r.c_llr_unbounded is not None
+                else f"{r.name}=n/a"
                 for r in results
             )
+            clipped = results[0].clipped_fraction if results else None
             print(
-                f"    {duration:>4g}s  C_llr_min {c_llr_min:.3f} | {summary}",
+                f"    {duration:>4g}s  C_llr_min {c_llr_min:.3f} | {summary}"
+                + (f" | clipped {clipped * 100:.1f}%" if clipped is not None else ""),
                 flush=True,
             )
 

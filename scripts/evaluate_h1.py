@@ -67,7 +67,7 @@ from scripts.experiment import (
     summarise_codec_modes,
     worker_count,
 )
-from viflap.analysis.calibration.calibrators import LogisticCalibrator
+from viflap.analysis.calibration.calibrators import LogisticCalibrator, as_reported
 from viflap.analysis.calibration.metrics import compute_cllr, compute_eer
 from viflap.analysis.channel.degradation import DegradationCondition, NoiseType
 from viflap.analysis.speaker.pipeline import SpeakerComparisonSystem
@@ -151,27 +151,6 @@ class CellResult:
     h1_falsified: bool
 
     notes: list[str] = field(default_factory=list)
-
-
-def _as_reported(
-    calibrator: LogisticCalibrator, scores: NDArray[np.float64]
-) -> NDArray[np.float64]:
-    """Calibrated log-LRs as the system would actually report them.
-
-    ``transform`` is the raw mapping; it is not what any deployment emits.
-    :meth:`Calibrator.calibrate` additionally clips to the empirical bounds
-    fitted on the development set, and that clip is a load-bearing part of the
-    system rather than a cosmetic one — it is what stops a calibration
-    extrapolating past the strength its validation data can support.
-
-    Measuring ``transform`` and calling the result ``C_llr`` therefore answers a
-    question nobody asked: it scores a mapping that never reaches a report. The
-    difference is not small. On this corpus the unbounded figure overstated
-    calibration loss by a factor of roughly three, and it made a kernel-density
-    calibrator look catastrophic when the bounded form is competitive.
-    """
-    bounds = calibrator.bounds
-    return np.clip(calibrator.transform(scores), bounds.lower_log_lr, bounds.upper_log_lr)
 
 
 def _fit_calibrator(trials: TrialSet) -> LogisticCalibrator | None:
@@ -321,7 +300,7 @@ def evaluate_cell(
             "as a likelihood ratio would carry a strength it does not have"
         )
     else:
-        calibrated = _as_reported(matched, eval_trials.scores)
+        calibrated = as_reported(matched, eval_trials.scores)
         estimate = _bootstrap(compute_cllr, calibrated, eval_trials, n_resamples)
         if estimate is not None:
             c_llr_matched = estimate.value
@@ -335,7 +314,7 @@ def evaluate_cell(
     c_llr_transferred_unbounded = None
     if transferred is not None:
         c_llr_transferred = compute_cllr(
-            _as_reported(transferred, eval_trials.scores), eval_trials.labels
+            as_reported(transferred, eval_trials.scores), eval_trials.labels
         )
         calibration_loss_transferred = c_llr_transferred - c_llr_min_point
         c_llr_transferred_unbounded = compute_cllr(

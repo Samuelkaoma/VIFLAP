@@ -14,6 +14,7 @@ from viflap.analysis.calibration.calibrators import (
     KernelDensityCalibrator,
     LogisticCalibrator,
     _gaussian_kde_log_density,
+    as_reported,
 )
 from viflap.analysis.calibration.elub import apply_bounds, empirical_bounds
 from viflap.analysis.calibration.metrics import (
@@ -301,3 +302,55 @@ class TestEmpiricalBounds:
         clipped = apply_bounds(np.array([-100.0, 0.0, 100.0]), bounds)
         assert clipped[0] == pytest.approx(bounds.lower_log_lr)
         assert clipped[2] == pytest.approx(bounds.upper_log_lr)
+
+
+class TestAsReported:
+    """The array form of ``calibrate``, and the reason it is not written twice.
+
+    ``data/reports/calibrator_comparison.json`` came to hold unbounded values
+    under a schema the results document reads as bounded ones, because one
+    script clipped and another did not. Both now call this function.
+    """
+
+    @pytest.fixture
+    def fitted(self, rng):
+        labels = np.concatenate([np.ones(2000), np.zeros(2000)]).astype(int)
+        scores = np.concatenate(
+            [rng.normal(60.0, 20.0, 2000), rng.normal(10.0, 20.0, 2000)]
+        )
+        return LogisticCalibrator().fit(scores, labels), scores, labels
+
+    def test_agrees_with_the_scalar_path_elementwise(self, fitted) -> None:
+        """The anti-drift check: the two routes to a reported LR are one route."""
+        calibrator, scores, _ = fitted
+        probe = np.concatenate([scores[:50], np.array([-500.0, 0.0, 500.0])])
+        expected = np.array([calibrator.calibrate(s).log_lr.value for s in probe])
+        assert as_reported(calibrator, probe) == pytest.approx(expected, abs=1e-12)
+
+    def test_differs_from_transform_where_the_clip_bites(self, fitted) -> None:
+        calibrator, _, _ = fitted
+        far = np.array([-500.0, 500.0])
+        assert not np.allclose(as_reported(calibrator, far), calibrator.transform(far))
+
+    def test_never_leaves_the_supported_range(self, fitted) -> None:
+        calibrator, scores, _ = fitted
+        bounds = calibrator.bounds
+        reported = as_reported(calibrator, np.concatenate([scores, [-1e6, 1e6]]))
+        assert reported.min() >= bounds.lower_log_lr - 1e-12
+        assert reported.max() <= bounds.upper_log_lr + 1e-12
+
+    def test_order_preserving_calibrators_share_their_bounds(self, fitted) -> None:
+        """§15's point, as a test rather than as prose.
+
+        ``empirical_bounds`` is computed from a PAV fit, which reads only the
+        rank order of the scores. A logistic map is affine-increasing and an
+        isotonic map is monotone, so neither changes that order and both must
+        arrive at the same bounds. Three calibrator families landing within 0.01
+        of one another after clipping is therefore close to a necessity rather
+        than a finding about calibration, which is what §5 read it as.
+        """
+        _, scores, labels = fitted
+        logistic = LogisticCalibrator().fit(scores, labels).bounds
+        isotonic = IsotonicCalibrator().fit(scores, labels).bounds
+        assert logistic.lower_log_lr == pytest.approx(isotonic.lower_log_lr, abs=1e-9)
+        assert logistic.upper_log_lr == pytest.approx(isotonic.upper_log_lr, abs=1e-9)
