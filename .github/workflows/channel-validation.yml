@@ -105,31 +105,63 @@ jobs:
             --pattern '*.flac' \
             --max-recordings "${{ inputs.max_recordings || '48' }}" \
             --max-seconds "${{ inputs.max_seconds || '30' }}" \
-            --output data/reports/channel_validation.json
+            --output data/reports/channel_validation.json > measure.log 2>&1
           echo "status=$?" >> "$GITHUB_OUTPUT"
+          cat measure.log
 
       # The committed report is the only channel back to the development machine,
       # which cannot reach api.github.com and therefore cannot read this log or
-      # download an artefact. A run that died before measuring anything must
-      # still leave something behind, or silence there is indistinguishable from
-      # a run that is merely slow.
-      - name: Record a failure the same way as a result
+      # download an artefact. So every run has to leave a trace, and the first
+      # attempt at that did not work.
+      #
+      # It wrote a failure report only when the report file was missing — and
+      # the report file is force-added, so a checkout always provides one. Two
+      # runs then crashed inside the measurement, left the checked-out report
+      # untouched, and the commit step correctly reported "unchanged" and
+      # committed nothing. Silence, again, and this time it looked exactly like
+      # a slow run.
+      #
+      # The status file fixes it by construction: it carries the run id, so it
+      # differs on every run and is always committed. Silence now means one
+      # thing only — the job never reached this step.
+      - name: Record what this run actually did
         if: always()
         run: |
-          if [ ! -f data/reports/channel_validation.json ]; then
-            mkdir -p data/reports
-            cat > data/reports/channel_validation.json <<JSON
-          {
-            "available": false,
-            "reached_measurement": false,
-            "measure_step_outcome": "${{ steps.measure.outcome }}",
-            "run": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
-            "notes": [
-              "the workflow failed before writing a report; nothing was measured"
-            ]
-          }
-          JSON
-          fi
+          mkdir -p data/reports
+          MEASURE_STATUS="${{ steps.measure.outputs.status }}" \
+          MEASURE_OUTCOME="${{ steps.measure.outcome }}" \
+          JOB_STATUS="${{ job.status }}" \
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+          RUN_SHA="${{ github.sha }}" \
+          python - <<'PY'
+          import json, os, pathlib
+
+          log = pathlib.Path("measure.log")
+          status = os.environ.get("MEASURE_STATUS", "")
+          pathlib.Path("data/reports/channel_validation_status.json").write_text(
+              json.dumps(
+                  {
+                      "run": os.environ["RUN_URL"],
+                      "commit": os.environ["RUN_SHA"],
+                      "measure_exit_status": status or "step did not reach its exit",
+                      "measure_step_outcome": os.environ.get("MEASURE_OUTCOME", ""),
+                      "job_status_so_far": os.environ.get("JOB_STATUS", ""),
+                      # 0 measured against a reference coder, 1 found no encoder
+                      # and said so. Anything else is a crash, and the tail is
+                      # the only way to see it from a machine that cannot read
+                      # this job's log.
+                      "measurement_succeeded": status in {"0", "1"},
+                      "log_tail": log.read_text(encoding="utf-8", errors="replace")
+                      .splitlines()[-40:]
+                      if log.exists()
+                      else ["the measure step produced no log"],
+                  },
+                  indent=2,
+              ),
+              encoding="utf-8",
+          )
+          PY
+          cat data/reports/channel_validation_status.json
 
       # Committed rather than left as an artefact only. Downloading an artefact
       # and retyping a table is how a figure gets carried into a context it does
@@ -139,15 +171,16 @@ jobs:
       # number that arrives by commit is the number that was measured.
       #
       # Force-added by name: data/ is ignored so that evidence cannot reach the
-      # history by accident, and one named report is not a reason to relax that.
+      # history by accident, and two named reports are not a reason to relax that.
       - name: Commit the report
         if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -f data/reports/channel_validation.json
+          git add -f data/reports/channel_validation_status.json
           if git diff --cached --quiet; then
-            echo "the report is unchanged from the committed one"
+            echo "nothing to commit, which should now be impossible"
           else
             git commit -m "Measure the real AMR-NB coder against the parametric model
 
@@ -161,7 +194,10 @@ jobs:
         if: always()
         with:
           name: channel-validation
-          path: data/reports/channel_validation.json
+          path: |
+            data/reports/channel_validation.json
+            data/reports/channel_validation_status.json
+            measure.log
 
       # Last, so the report is committed either way. A run that found no encoder
       # has still recorded something useful and should still be red.
