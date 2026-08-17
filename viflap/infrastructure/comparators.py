@@ -147,7 +147,7 @@ class CalibratedStreamComparator:
         — a point estimate can sit at the bound, but the interval must not run
         past it and imply the system could have said more.
         """
-        bounds = self._calibrator.bounds  # type: ignore[attr-defined]
+        bounds = self._calibrator.bounds
         if self._residual_spread > 0.0:
             half_width = 1.96 * self._residual_spread
         else:
