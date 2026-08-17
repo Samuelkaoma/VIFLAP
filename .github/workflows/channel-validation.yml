@@ -19,7 +19,7 @@ on:
     inputs:
       max_recordings:
         description: "Recordings to measure"
-        default: "6"
+        default: "24"
       max_seconds:
         description: "Seconds of each recording"
         default: "30"
@@ -74,14 +74,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[experiments,dev]"
 
-      # The corpus is not in the repository and must not be. Two speakers is
-      # ample: the comparison is one coder against another over identical input,
-      # so it needs representative speech rather than a corpus. The selection is
-      # deterministic, so the sample is the same on every run.
+      # The corpus is not in the repository and must not be. The comparison is
+      # one coder against another over identical input, so it needs
+      # representative speech rather than a corpus — but "representative" has to
+      # include more than one voice, which the first run did not: it measured
+      # six utterances from a single chapter of a single speaker. Eight speakers
+      # here, and `select_recordings` takes them round-robin. Deterministic
+      # throughout, so the sample is the same on every run.
       - name: Fetch a minimal speech sample
         run: |
           python -m scripts.fetch_corpus \
-            --max-speakers 2 \
+            --max-speakers 8 \
             --chapters-per-speaker 2 \
             --utterances-per-chapter 6
 

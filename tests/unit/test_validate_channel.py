@@ -19,6 +19,7 @@ from scripts.validate_channel import (
     compare,
     estimate_delay,
     probe_ffmpeg,
+    select_recordings,
 )
 from viflap.analysis.channel.codec import NARROWBAND_RATE
 
@@ -96,6 +97,51 @@ class TestCompare:
     def test_refuses_to_report_a_figure_from_no_frames(self) -> None:
         with pytest.raises(ValueError, match="no comparable frames"):
             compare("empty", [np.zeros(8)], [np.zeros(8)], "a", "b", None)
+
+
+class TestSelectRecordings:
+    """Six recordings from one chapter of one speaker is not six recordings.
+
+    That is what the first run of this measurement actually sampled: a sorted
+    glob puts one speaker's files consecutively, so taking the first N of it
+    took one voice. Coding distortion varies with the voice, so the sample has
+    to span speakers or the figure is narrower than it reads.
+    """
+
+    @staticmethod
+    def _corpus(root, speakers: dict[str, int]):
+        for speaker, count in speakers.items():
+            directory = root / speaker / "chapter"
+            directory.mkdir(parents=True)
+            for index in range(count):
+                (directory / f"{speaker}-{index:03d}.flac").write_bytes(b"")
+        return root
+
+    def test_spreads_across_speakers_before_taking_a_second_from_any(
+        self, tmp_path
+    ) -> None:
+        root = self._corpus(tmp_path, {"101": 6, "202": 6, "303": 6})
+        chosen = select_recordings(root, "*.flac", 6)
+        speakers = [path.relative_to(root).parts[0] for path in chosen]
+        assert sorted(set(speakers)) == ["101", "202", "303"]
+        assert speakers.count("101") == 2
+
+    def test_falls_back_to_the_speakers_that_have_material(self, tmp_path) -> None:
+        """An uneven corpus must still fill the request rather than stopping."""
+        root = self._corpus(tmp_path, {"101": 1, "202": 5})
+        chosen = select_recordings(root, "*.flac", 4)
+        assert len(chosen) == 4
+
+    def test_never_returns_more_than_the_corpus_holds(self, tmp_path) -> None:
+        root = self._corpus(tmp_path, {"101": 2, "202": 1})
+        assert len(select_recordings(root, "*.flac", 50)) == 3
+
+    def test_is_the_same_selection_on_every_run(self, tmp_path) -> None:
+        root = self._corpus(tmp_path, {"101": 4, "202": 4, "303": 4})
+        assert select_recordings(root, "*.flac", 7) == select_recordings(root, "*.flac", 7)
+
+    def test_an_empty_corpus_selects_nothing_rather_than_failing(self, tmp_path) -> None:
+        assert select_recordings(tmp_path, "*.flac", 6) == []
 
 
 class TestProbeFfmpeg:

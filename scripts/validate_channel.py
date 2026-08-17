@@ -289,6 +289,45 @@ def compare(
     )
 
 
+def select_recordings(root: Path, pattern: str, limit: int) -> list[Path]:
+    """Take ``limit`` recordings spread across speakers, deterministically.
+
+    The obvious selection — the first ``limit`` of a sorted glob — is
+    deterministic and unrepresentative, and the first run of this measurement
+    showed how badly. Asked for six recordings from a two-speaker sample, it
+    returned six utterances from a single chapter of a single speaker, because
+    a sorted corpus path puts one speaker's files consecutively. Coding
+    distortion varies with voice: a coder's excitation model does more damage to
+    some speakers than to others, and a figure quoted as "six recordings" that
+    is really one voice reads as broader evidence than it is.
+
+    Recordings are therefore taken round-robin across the top-level directories
+    under ``root``, which for LibriSpeech and BembaSpeech alike is the speaker.
+    Sorted throughout, so the sample is still the same on every run.
+    """
+    by_speaker: dict[str, list[Path]] = {}
+    for path in sorted(root.rglob(pattern)):
+        try:
+            speaker = path.relative_to(root).parts[0]
+        except ValueError:  # pragma: no cover - rglob results are always under root
+            speaker = path.parent.name
+        by_speaker.setdefault(speaker, []).append(path)
+
+    selected: list[Path] = []
+    rounds = 0
+    while len(selected) < limit and any(
+        len(paths) > rounds for paths in by_speaker.values()
+    ):
+        for speaker in sorted(by_speaker):
+            if len(selected) >= limit:
+                break
+            paths = by_speaker[speaker]
+            if len(paths) > rounds:
+                selected.append(paths[rounds])
+        rounds += 1
+    return selected
+
+
 def load_audio(paths: Sequence[Path], max_seconds: float) -> list[NDArray[np.float64]]:
     """Read recordings, peak-normalised, truncated to a common maximum length."""
     import soundfile as sf
@@ -450,7 +489,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=20250601)
     arguments = parser.parse_args(argv)
 
-    paths = sorted(arguments.audio.rglob(arguments.pattern))[: arguments.max_recordings]
+    paths = select_recordings(arguments.audio, arguments.pattern, arguments.max_recordings)
     if not paths:
         print(
             f"no audio matching {arguments.pattern} under {arguments.audio}",
