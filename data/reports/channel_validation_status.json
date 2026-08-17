@@ -1,0 +1,31 @@
+{
+  "run": "https://github.com/Samuelkaoma/VIFLAP/actions/runs/32018013202",
+  "commit": "3e42624341e26107bd4a2c95da74a08bedcd09cc",
+  "measure_exit_status": "0",
+  "measure_step_outcome": "success",
+  "job_status_so_far": "success",
+  "measurement_succeeded": true,
+  "log_tail": [
+    "measuring 48 recordings from data/corpus/librispeech",
+    "",
+    "AMR-NB encoder available: True (libopencore_amrnb)",
+    "48 recordings, 16000 Hz source, 173s",
+    "ffmpeg: /usr/bin/ffmpeg",
+    "  encoder: A....D libopencore_amrnb    OpenCORE AMR-NB (Adaptive Multi-Rate Narrow-Band) (codec amr_nb)",
+    "  encoder: A....D libvo_amrwbenc       Android VisualOn AMR-WB (Adaptive Multi-Rate Wide-Band) (codec amr_wb)",
+    "  decoder: A....D amrnb                AMR-NB (Adaptive Multi-Rate NarrowBand) (codec amr_nb)",
+    "  decoder: A....D libopencore_amrnb    OpenCORE AMR-NB (Adaptive Multi-Rate Narrow-Band) (codec amr_nb)",
+    "  decoder: A....D amrwb                AMR-WB (Adaptive Multi-Rate WideBand) (codec amr_wb)",
+    "  decoder: A....D libopencore_amrwb    OpenCORE AMR-WB (Adaptive Multi-Rate Wide-Band) (codec amr_wb)",
+    "",
+    "comparison                                    frames  LSD dB   >2dB  segSNR  delay",
+    "parametric vs band-matched source @ 12.2       47090    6.79  99.3%    3.98      0",
+    "reference vs band-matched source @ 12.2        49818    3.22  87.6%    2.18     39",
+    "parametric vs reference @ 12.2                 47027    6.93  99.9%    1.59      0",
+    "parametric vs band-matched source @ 4.75       43975    8.57 100.0%    1.71      0",
+    "reference vs band-matched source @ 4.75        48256    5.71  99.8%    1.27     39",
+    "parametric vs reference @ 4.75                 43709    7.78 100.0%   -0.15      0",
+    "",
+    "wrote data/reports/channel_validation.json"
+  ]
+}

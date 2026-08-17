@@ -9,7 +9,7 @@
     4.75
   ],
   "sample_rate": 16000,
-  "elapsed_seconds": 170.0,
+  "elapsed_seconds": 173.2,
   "ffmpeg": {
     "ffmpeg_path": "/usr/bin/ffmpeg",
     "version": "ffmpeg version 6.1.1-3ubuntu5 Copyright (c) 2000-2023 the FFmpeg developers",
@@ -113,14 +113,14 @@
       "subject": "parametric_celp",
       "bitrate_kbps": 12.2,
       "n_recordings": 48,
-      "n_frames": 46428,
-      "mean_spectral_distortion_db": 7.9694,
-      "median_spectral_distortion_db": 7.3788,
-      "fraction_frames_above_2db": 0.9995,
-      "mean_segmental_snr_db": -1.8687,
-      "median_segmental_snr_db": -1.5667,
-      "mean_delay_samples": 39.2,
-      "max_delay_samples": 192
+      "n_frames": 47027,
+      "mean_spectral_distortion_db": 6.9269,
+      "median_spectral_distortion_db": 6.4569,
+      "fraction_frames_above_2db": 0.9986,
+      "mean_segmental_snr_db": 1.5919,
+      "median_segmental_snr_db": 1.3727,
+      "mean_delay_samples": 0.0,
+      "max_delay_samples": 1
     },
     {
       "label": "parametric vs band-matched source @ 4.75",
@@ -158,14 +158,14 @@
       "subject": "parametric_celp",
       "bitrate_kbps": 4.75,
       "n_recordings": 48,
-      "n_frames": 43316,
-      "mean_spectral_distortion_db": 8.6725,
-      "median_spectral_distortion_db": 8.0084,
-      "fraction_frames_above_2db": 0.9999,
-      "mean_segmental_snr_db": -2.1234,
-      "median_segmental_snr_db": -1.5933,
-      "mean_delay_samples": 39.6,
-      "max_delay_samples": 164
+      "n_frames": 43709,
+      "mean_spectral_distortion_db": 7.7835,
+      "median_spectral_distortion_db": 7.211,
+      "fraction_frames_above_2db": 0.9998,
+      "mean_segmental_snr_db": -0.1486,
+      "median_segmental_snr_db": -0.0974,
+      "mean_delay_samples": 0.0,
+      "max_delay_samples": 0
     }
   ]
 }
