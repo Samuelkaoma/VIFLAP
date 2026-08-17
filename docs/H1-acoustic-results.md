@@ -50,6 +50,30 @@ rather than assumed.
 | Training frames (UBM estimation) | 599,878 |
 | Training recordings skipped | 0 |
 | PLDA between-speaker variance, max / mean | 50.76 / 1.57 |
+| PLDA `psi` spectrum, ψ₁ / ψ₂ / ratio | 50.76 / 9.90 / **5.13** |
+| PLDA dimensions with ψ < 0.1 | **40 of 100** |
+
+The last two rows are the back-end's health, and they are here because nothing
+else in this document shows it. In the diagonalised space `W = I`, so `psi` is
+the between-speaker variance expressed in units of the within-speaker variance:
+a dimension at ψ = 0.1 has a between-speaker standard deviation under a third of
+its within-speaker one, and two recordings of one person differ along it by more
+than two different people do. Forty such dimensions of a hundred are carrying
+almost nothing.
+
+`PldaModel.effective_dimension` was supposed to report this and did not. It
+tested `psi > 1e-6` — a test for exact numerical collapse — so it returned
+100 of 100 for every model this project has trained, including this one. The
+threshold is now 0.1 and named; the count above is what the corrected
+diagnostic returns.
+
+**ψ₁ is five times ψ₂, and that is the more interesting number.** One dominant
+axis of between-speaker variation is what a nuisance factor absorbed into the
+speaker subspace looks like, because a factor shared across a speaker's
+recordings is indistinguishable from the speaker as far as PLDA is concerned.
+The ratio runs 5.1 to 7.0 across all five models on disk and across all three
+cepstral-normalisation front-ends, so whatever produces it is not a
+normalisation artefact. §21 reports what it is and whether removing it helps.
 
 Training was multi-condition: each of the 614 training recordings was passed
 through one of eight channel conditions spanning 4.75–12.20 kbit/s, clean,
@@ -267,6 +291,21 @@ logistic form costs essentially nothing once the empirical bounds are applied,
 and no available calibrator family recovers a meaningful part of the remaining
 gap. Where the reported likelihood ratio falls short of the discrimination, the
 shortfall is small and it is not the mapping's fault.
+
+> **The artefact said something else, and the artefact was wrong.** Until now
+> `calibrator_comparison.json` held 0.603 / 0.451 / 9.929 under a field named
+> `c_llr` — the *unbounded* mapping. The figures in this paragraph are the
+> bounded ones and were correct, having been recomputed by hand, but anyone
+> opening the JSON would have concluded they had been edited rather than
+> measured. The script was scoring `Calibrator.transform`; it now reaches the
+> reported quantity through the same `as_reported` helper `evaluate_h1.py` uses,
+> so the two cannot disagree about what a reported likelihood ratio is.
+>
+> Rerun, it reproduces every figure in this paragraph — 0.4164 / 0.4258 /
+> 0.4200 — and every clipped fraction in §15, and now records both columns, the
+> clipped fraction by class, and the bounds themselves. §15 explains why the
+> conclusion drawn from these numbers does not follow even though the numbers
+> hold.
 
 **A correction, recorded because the wrong version was written down first.** An
 earlier draft of this document claimed matched calibration cost ~0.26 bits and
@@ -1687,6 +1726,21 @@ bounds — measured, at 12.2 clean 30 s, as log₁₀ [−2.347, 3.644] for each
 three calibrator families land within 0.01 of one another post-clip is close to
 a mathematical necessity rather than an empirical finding about calibration.
 
+> **Now recorded in the artefact, and with a control that was not looked for.**
+> The rerun of `compare_calibrators.py` stores each calibrator's bounds. The two
+> order-preserving families agree to every digit printed, as the argument
+> requires. The kernel-density calibrator does **not**: log₁₀ [−2.374, 3.611].
+> That is the mechanism confirming itself rather than an anomaly — a ratio of
+> two estimated densities need not be monotone in the score, so it is the one
+> family of the three that can reorder trials, and it is the one whose bounds
+> move. The identity is a consequence of order preservation, which is now
+> visible in the output rather than argued in prose, and there is a unit test
+> asserting it.
+>
+> The clipping asymmetry is likewise stored per calibrator and reproduces: at
+> the best cell, 60.6% of all trials clipped, 61.5% of different-source against
+> 3.0% of same-source.
+
 ### What follows
 
 Report both columns. `evaluate_h1.py` already stores `c_llr_matched_unbounded`
@@ -1702,6 +1756,10 @@ currently conceals by dragging both to nearly the same place.
 ---
 
 ## 16. The channel is a model of a codec, and it has never been validated
+
+> **It has now. §20 reports the measurement this section asks for, and it
+> corrects both of the findings below.** The heading stands as written because
+> it was true when written and the correction is part of the record.
 
 §1 records that the channel is a parametric CELP model rather than a reference
 AMR-NB coder, because ffmpeg was unavailable. That is stated everywhere it
@@ -1725,6 +1783,17 @@ interleaved algebraic tracks that produce a real ACELP coder's distortion.
 of bits.** They name two points in a two-parameter family.
 
 ### Measured spectral distortion
+
+> **The measurement this section calls for has now been made, and it corrects
+> both findings below. See §20.** The reference coder run beside the model on
+> identical input gives 3.28 dB where the model gives 6.63 — the model is about
+> **twice** as harsh, not the six times the comparison against a 1 dB standards
+> criterion implied, because that criterion describes an LSF quantiser in
+> isolation rather than an envelope re-estimated from a decoded
+> analysis-by-synthesis waveform. And the bitrate claim below is **withdrawn**:
+> the figures in this table do not reproduce under the measurement script that
+> now exists, whose code was written after this section and is the only version
+> with tests behind it.
 
 Log-spectral distance between LPC envelopes, six BembaSpeech recordings, 3,408
 frames, comparing the codec output against a reference resampled to the same
@@ -1750,6 +1819,22 @@ bitrate-independent distortion — about five percent of the total. That is the
 mechanism behind §5's finding that bitrate costs +0.001 at 30 seconds: the knob
 being varied moves the spectral envelope very little compared with what the rest
 of the codec is already doing to it.
+
+> **Withdrawn.** The 0.33 dB gap does not reproduce. `scripts/validate_channel.py`
+> was written after this section and its measurement is the one with tests; run
+> over BembaSpeech on the development machine it gives 8.02 dB at 12.2 and
+> 9.74 dB at 4.75, a gap of **1.72 dB**, and over LibriSpeech on a runner
+> 6.63 and 8.79, a gap of **2.16 dB**. The reference AMR-NB coder's own gap,
+> measured identically, is **2.47 dB**. So the model's bitrate knob moves a
+> comparable share of its distortion to the real coder's, and the reasoning
+> built on it here — that §5's flat bitrate row is explained by a knob that
+> barely moves — does not hold.
+>
+> The figures in the table above came from a measurement whose code was never
+> committed; this section shipped with the first version of this document, and
+> `validate_channel.py` did not exist yet. They cannot be reproduced, which is
+> the reason they are withdrawn rather than merely superseded. §20 reports what
+> the committed measurement says.
 
 An external review measured the LSF quantiser *in isolation* and found it
 transparent — 0.21 dB at the 12.2 setting — and concluded the model was too
@@ -2164,3 +2249,148 @@ content-derived model id is for.
 
 **The iteration counts of the models in §§4–17 are unknown.** They were not
 recorded. Models trained from here on carry them.
+
+---
+
+## 20. The channel model, against the coder it models
+
+§16 named the measurement that had never been made — run both coders over the
+same recordings and report the difference — and §1, §6 and §16 all scope every
+absolute figure in this document on the fact that it had not been. It has now
+been made. `data/reports/channel_validation.json` is the artefact and
+`scripts/validate_channel.py` produced it.
+
+### Getting an encoder, which took four attempts and is the useful part
+
+The development machine has no ffmpeg carrying AMR-NB and cannot get one. A
+GitHub runner can, and the job is in `.github/workflows/channel-validation.yml`.
+Four things had to be true before it measured anything, and each was found by a
+run that failed to:
+
+**The Actions tab is unreachable from where the work is done.** `api.github.com`
+is blocked on this network, so neither the button nor `gh workflow run` exists
+here, while plain git over SSH does. The workflow now also triggers on a tag
+matching `channel-validation-*`. Pushing one is the same deliberate act as
+pressing the button, expressed in the only protocol available.
+
+**So is the log, and so are artefacts.** A run that dies before measuring is
+otherwise indistinguishable from a slow one. The job commits its report — and
+commits one saying it failed, when it does — because `git fetch` is the only
+status channel there is.
+
+**`ffmpeg` is not enough.** The first run installed ffmpeg and correctly
+reported `available: false`. Debian and Ubuntu build libavcodec twice and the
+default package omits the patent-encumbered and GPLv3 codecs, opencore-amr among
+them; `libavcodec-extra` is the flavour that carries it. Diagnosing that from
+`ffmpeg_encoder: null` was not possible, so the report now carries the ffmpeg
+path, version, configure line and every AMR row of the encoder and decoder
+tables. The second run confirmed the guess in one shot.
+
+**Six recordings were one voice.** The selection took the first six of a sorted
+glob, and a corpus path puts one speaker's files consecutively, so a
+"two-speaker sample" measured six utterances from a single chapter of speaker
+374. Deterministic and unrepresentative: coding distortion varies with the
+voice. Recordings are now taken round-robin across speakers, and the sample is
+48 recordings across 16.
+
+A fifth thing was found only after a real measurement existed to expose it, and
+is recorded below with the caveats rather than here, because it is a defect in
+the measurement rather than in getting one to run.
+
+### Result
+
+48 LibriSpeech recordings across 16 speakers, 30 s each, 47,090 frames, through
+both coders. Log-spectral distance between LPC envelopes against the source
+resampled to the same 8 kHz band, so the bandwidth reduction — a property of the
+channel rather than of either coder — is not charged to either.
+
+| Coder | Rate | LSD (dB) | Frames > 2 dB | seg. SNR (dB) | Delay |
+|---|---:|---:|---:|---:|---:|
+| **reference AMR-NB** | 12.20 | **3.22** | 87.6% | 2.18 | 39.3 |
+| parametric model | 12.20 | **6.79** | 99.3% | 3.99 | 0.0 |
+| **reference AMR-NB** | 4.75 | **5.71** | 99.8% | 1.27 | 39.3 |
+| parametric model | 4.75 | **8.57** | 100.0% | 1.71 | 0.0 |
+
+The figures are stable in the sample size, which is worth stating because the
+first successful run measured six recordings from six speakers and this one
+measured eight times as many across sixteen: 3.28 → 3.22 and 6.63 → 6.79 at
+12.2 kbit/s. Whatever these numbers are limited by, it is not how many
+recordings went into them.
+
+**The model is about twice as harsh as the coder it models**, not six times.
+§16 set its 6.6 dB against a standards criterion of roughly 1 dB and concluded
+the model was far harsher than any real coder. That comparison was not
+like-for-like: the 1 dB figure describes an LSF quantiser measured in isolation,
+and what is measured here is an LPC envelope re-estimated from a decoded
+analysis-by-synthesis waveform. Measured the same way, the reference coder gives
+3.22 dB and puts 87.6% of frames beyond 2 dB. The ratio is **2.11 at
+12.2 kbit/s and 1.50 at 4.75**. The direction of §16's finding stands and its
+magnitude halves.
+
+**The bitrate axis is not a token, and §16's claim that it was is withdrawn.**
+The reference coder moves **2.48 dB** from 12.2 to 4.75 kbit/s; the model moves
+**1.79 dB**, about seventy percent of it. Both are a fifth or more of the total
+distortion rather than the five percent §16 reported. §16's 0.33 dB does not
+reproduce — see the correction there — and the reasoning it supported, that §5's
+flat bitrate row is explained by a knob that barely moves, does not survive it.
+
+That leaves §5's bitrate row **better** supported than §16 allowed rather than
+scoped away. The knob does move real spectral distortion, comparably to the real
+coder's, and `C_llr_min` still barely responds at 30 seconds. §5's own
+explanation — that with enough frames the i-vector averages away coarser
+spectral quantisation, and at 5 seconds it cannot — is what is left standing.
+
+### What is not yet reliable in this table, and is recorded rather than trimmed
+
+**The coder-against-coder rows are omitted, because they were misaligned.** They
+are the rows the whole measurement exists to produce, and they were wrong.
+`estimate_delay` searches non-negative lags only, on the physical ground that a
+codec delays its output rather than anticipating its input. That holds for a
+coder against its source and fails for one coder against the other: this model
+returns its output aligned with the input while AMR delays by about 40 samples,
+so the model's signal *leads* and the estimator cannot express it. Asked for a
+non-negative lag it returns the best one available, which is noise — the run
+above reports a mean delay of 39 samples with a **maximum of 192** on a
+comparison whose true offset is a constant −40.
+
+That was visible only because the delay is recorded per comparison, which is
+exactly what that field was put there for. Both coded signals are now aligned to
+the band-matched source they share before being compared with each other, and a
+rerun supersedes those rows.
+
+The two rows against the source are unaffected: each coder is compared with its
+own input, where the non-negative rule is correct, and both report a delay
+consistent to within a sample across all 48 recordings.
+
+**Segmental SNR should not be read across coders yet.** The reference reads
+*lower* than the model (2.18 against 3.99 dB) while distorting the envelope
+half as much. Delay is estimated to the sample, and a residual sub-sample offset
+depresses a phase-sensitive measure while leaving an envelope measure alone, so
+the most likely reading is that the reference's 39-sample alignment is not being
+removed exactly. Log-spectral distance is the figure to take from this table.
+
+**One recording per speaker per condition, and one corpus.** LibriSpeech read
+speech, not telephony, and the material is the one caveat this measurement
+shares with everything else in the document.
+
+### What this does and does not do to the rest of the document
+
+**Every absolute figure remains conditional on the parametric model, and is
+still pessimistic** — by a factor of about two in spectral distortion, whose
+translation into `C_llr_min` is unmeasured. That second half of §16's request
+needs the reference coder and an evaluation together, and the machine that has
+the models cannot run the coder while the machine that can run the coder does
+not have the corpus. It is the obvious next use of the workflow.
+
+**§12's benchmark gap narrows in a stateable direction.** E3FS3's figures come
+from real GSM 06.10, G.729a and G.723.1. This channel is harsher than a real
+narrowband coder by about a factor of two in envelope distortion, so part of the
+0.336-against-0.208 gap is channel severity rather than system quality.
+
+**The paired comparisons are untouched.** §7, §9 and §17 compare two models
+through the same channel, so severity is common to both arms and cancels.
+
+**And "12.2 kbit/s" still names no quantity of bits.** §16's first finding —
+that the labels set an LSF step and a pulse count and nothing else — is about
+the implementation rather than about the distortion, and nothing here bears on
+it.
