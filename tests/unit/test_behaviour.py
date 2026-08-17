@@ -375,30 +375,25 @@ class TestDelegationSignature:
         assert same_operator < 0.0
         assert delegated > same_operator
 
-    def test_character_ngrams_carry_speaker_evidence_into_the_script_term(
+    def test_character_ngrams_measure_the_speaker_rather_than_the_script(
         self, profiles: dict[str, BehaviouralProfile]
     ) -> None:
-        """A characterisation test for a real problem, not an endorsement of it.
+        """The measurement that decided where the n-gram term belongs.
 
-        ``script_log_lr`` sums move evidence, sequence evidence and a character
-        n-gram term. Character n-grams are the standard instrument of authorship
-        attribution — they measure who is writing. Here they are counted as
-        *script* evidence, the component whose entire purpose is to survive a
-        change of speaker.
+        Character n-grams are the standard instrument of authorship attribution
+        — they measure who is writing — and they were counted as *script*
+        evidence, the component whose entire purpose is to survive a change of
+        speaker.
 
-        The consequence is measurable: the n-gram term prefers two transcripts
-        by one operator over two transcripts sharing a script, and it is large
-        enough to reverse the sign of the whole script component. The move and
-        sequence terms, which do separate the pairs correctly, are swamped.
+        The consequence is measurable and is what this test pins: the n-gram
+        term prefers two transcripts by one operator over two transcripts
+        sharing a script, and it is large enough to swamp the move and sequence
+        terms, which do separate the pairs correctly. Placed in the script term
+        it reversed that component's sign.
 
-        This is pinned rather than fixed because the fix is a modelling
-        decision, not a bug fix: either n-grams move to the idiolect term, or
-        they are restricted to script-bearing spans, or the components are
-        calibrated separately so their magnitudes become comparable. That choice
-        needs labelled same-operation-different-speaker data, which the corpus
-        does not yet contain. Until then, this test fails loudly if the
-        behaviour changes, and documents why the delegation flag should not be
-        trusted on ``script_log_lr`` alone.
+        The term now sits in the idiolect component instead. This test measures
+        the comparator directly rather than through ``score``, so it says which
+        way the evidence runs; the placement itself is asserted separately.
         """
         ngrams = DirichletMultinomialComparator(
             _background(
@@ -427,6 +422,55 @@ class TestDelegationSignature:
                 profiles["a_one"].move_sequence, profiles["b_one"].move_sequence
             )
         )
+
+    def test_the_ngram_term_is_counted_as_idiolect(
+        self,
+        comparator: BehaviouralComparator,
+        profiles: dict[str, BehaviouralProfile],
+    ) -> None:
+        """Placement, asserted where it can be checked without arithmetic.
+
+        Removing the n-gram background leaves the comparator with the same
+        moves, sequence and function words. If the term is in the idiolect
+        component, dropping it moves the idiolect total and leaves the script
+        total untouched — which is the whole claim.
+        """
+        every = list(profiles.values())
+        without_ngrams = BehaviouralComparator(
+            function_word_background=_background(
+                _pool(*(p.function_word_counts for p in every)), "pooled function words"
+            ),
+            disfluency_background=_background(
+                _pool(*(p.disfluency_counts for p in every)), "pooled disfluencies"
+            ),
+            move_background=_background(
+                _pool(*(p.move_counts for p in every)), "pooled moves"
+            ),
+            ngram_background=_background({"zzzz": 1}, "an inventory nothing matches"),
+        )
+
+        full = comparator.score(profiles["a_one"], profiles["a_two"])
+        reduced = without_ngrams.score(profiles["a_one"], profiles["a_two"])
+
+        assert full.script_log_lr == pytest.approx(reduced.script_log_lr)
+        assert full.idiolect_log_lr != pytest.approx(reduced.idiolect_log_lr)
+
+    def test_the_delegation_flag_no_longer_rests_on_the_speaker_signal(
+        self,
+        comparator: BehaviouralComparator,
+        profiles: dict[str, BehaviouralProfile],
+    ) -> None:
+        """Two operators sharing one script is what the flag exists to catch.
+
+        It could not catch it while the strongest speaker feature was inside the
+        script term: two different operators have different n-grams, which drove
+        the script component down exactly when it should have been up.
+        """
+        delegated = comparator.score(profiles["a_one"], profiles["b_one"])
+        same_operator = comparator.score(profiles["a_one"], profiles["a_two"])
+
+        assert delegated.script_log_lr > 0.0
+        assert delegated.idiolect_log_lr < same_operator.idiolect_log_lr
 
     def test_one_operator_across_two_scripts_scores_idiolect_above_the_delegated_pair(
         self, comparator: BehaviouralComparator, profiles: dict[str, BehaviouralProfile]

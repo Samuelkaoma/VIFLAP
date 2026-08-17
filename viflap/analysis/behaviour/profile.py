@@ -330,11 +330,20 @@ class BehaviouralScore:
     """A behavioural comparison, decomposed by what it speaks to."""
 
     idiolect_log_lr: float
-    """Speaker-specific evidence: function words, disfluencies, code-switching.
-    Defeated if the group rotates who speaks."""
+    """Speaker-specific evidence: function words, disfluencies, code-switching,
+    utterance lengths and character n-grams. Defeated if the group rotates who
+    speaks.
+
+    Character n-grams sat in ``script_log_lr`` until they were measured. They
+    are the authorship literature's strongest single feature for identifying a
+    person, and here they were large enough to reverse the sign of the component
+    that exists to be person-independent. They also carry a script's fixed
+    wording, so their presence here is the better of two imperfect placements
+    rather than a clean one — see the note in
+    :meth:`BehaviouralComparator.score`."""
 
     script_log_lr: float
-    """Operation-specific evidence: move inventory, sequence, phrasing. Survives
+    """Operation-specific evidence: move inventory and move sequence. Survives
     delegation, and is what links incidents across operators in one group."""
 
     total_log_lr: float
@@ -439,15 +448,31 @@ class BehaviouralComparator:
             idiolect += self._utterance_lengths.log_likelihood_ratio(
                 first.log_utterance_lengths, second.log_utterance_lengths
             )
+        # Character n-grams are an idiolect feature, and were counted as script
+        # evidence until now. The authorship attribution literature reports them
+        # repeatedly as the single best-performing feature for identifying a
+        # *person* — they encode morphology, characteristic spellings,
+        # punctuation and capitalisation habits — so the strongest speaker
+        # signal available was sitting in the one component whose entire purpose
+        # is to survive a change of speaker. It was large enough to reverse the
+        # sign of that component, which is how the defect was found.
+        #
+        # This is not a clean separation and should not be reported as one. A
+        # scripted transcript's n-grams also carry the script's fixed wording,
+        # so some genuinely operation-level evidence moves across with them.
+        # Restricting them to script-bearing spans is the better fix and needs
+        # labelled same-operation-different-speaker data the corpus does not
+        # have. Placing them where the literature says they belong is the
+        # defensible choice in the meantime; leaving them where they were is not.
+        if first.character_ngram_counts and second.character_ngram_counts:
+            idiolect += self._ngrams.log_likelihood_ratio(
+                first.character_ngram_counts, second.character_ngram_counts
+            )
 
         script = 0.0
         if first.move_counts and second.move_counts:
             script += self._moves.log_likelihood_ratio(
                 first.move_counts, second.move_counts
-            )
-        if first.character_ngram_counts and second.character_ngram_counts:
-            script += self._ngrams.log_likelihood_ratio(
-                first.character_ngram_counts, second.character_ngram_counts
             )
         script += _sequence_log_lr(first.move_sequence, second.move_sequence)
 

@@ -1486,6 +1486,19 @@ weaker behavioural marginal is cheap and should be done before any figure from
 2. **Move character n-grams to the idiolect term**, or restrict them to
    script-bearing spans. The literature says plainly which component they belong
    to.
+
+   > **Done.** The n-gram term is now summed into `idiolect_log_lr`. The
+   > characterisation test that pinned the defect is kept and re-scoped: it
+   > still measures which way the n-gram evidence runs — one operator over one
+   > script, by a margin twenty times the sequence term — and two new tests
+   > assert the placement and that the delegation flag now behaves. It is not a
+   > clean separation and is not reported as one: a scripted transcript's
+   > n-grams carry the script's fixed wording too, so some operation-level
+   > evidence moves across with them. Restricting to script-bearing spans is the
+   > better fix and still needs the labelled data this section says does not
+   > exist. Placing them where the literature puts them is defensible in the
+   > meantime; leaving the strongest authorship feature inside the
+   > author-independent term was not.
 3. **Report the two components separately in any output**, which the code
    already does — and never fuse the behavioural stream as a single number
    without stating which component carried it.
