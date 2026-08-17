@@ -586,6 +586,16 @@ class SpeakerComparisonSystem:
             plda_psi=self._plda.psi,
             plda_speakers=np.array([self._plda.n_training_speakers]),
             plda_recordings=np.array([self._plda.n_training_recordings]),
+            # How the EM run that produced this model actually ended. §19 added
+            # these to PldaModel and said models trained from then on would
+            # carry them; they were carried in memory and dropped by the
+            # archive, so a model reloaded from disk reported zero iterations
+            # and not converged whatever it had done. They are metadata and
+            # take no part in the model id, which hashes the parameter arrays
+            # only — adding them here cannot rename an existing model.
+            plda_iterations=np.array([self._plda.n_iterations]),
+            plda_final_log_likelihood=np.array([self._plda.final_log_likelihood]),
+            plda_converged=np.array([self._plda.converged]),
             training_summary=np.array([json.dumps(self._training_summary)]),
             config=np.array([json.dumps(_config_to_dict(self._config))]),
             # A unicode array, not an object array. numpy will only unpickle an
@@ -625,12 +635,31 @@ class SpeakerComparisonSystem:
                 projection=archive["transform_projection"],
                 length_normalise=bool(archive["transform_length_normalise"][0]),
             )
+            # Absent from archives written before the convergence monitor
+            # existed, and from those written between it existing and being
+            # persisted. Zero iterations reads as unknown rather than none,
+            # which is what §19 says about the models in §§4-17; NaN is the
+            # only honest final likelihood for a run whose value was not kept.
+            keys = set(archive.files)
             plda = PldaModel(
                 mean=archive["plda_mean"],
                 transform=archive["plda_transform"],
                 psi=archive["plda_psi"],
                 n_training_speakers=int(archive["plda_speakers"][0]),
                 n_training_recordings=int(archive["plda_recordings"][0]),
+                n_iterations=(
+                    int(archive["plda_iterations"][0]) if "plda_iterations" in keys else 0
+                ),
+                final_log_likelihood=(
+                    float(archive["plda_final_log_likelihood"][0])
+                    if "plda_final_log_likelihood" in keys
+                    else float("nan")
+                ),
+                converged=(
+                    bool(archive["plda_converged"][0])
+                    if "plda_converged" in keys
+                    else False
+                ),
             )
             system = cls(
                 config=_config_from_dict(json.loads(str(archive["config"][0]))),

@@ -348,6 +348,61 @@ class TestArchiveRoundTrip:
         assert reloaded.config.front_end.sliding_cmvn_frames == 0
         assert reloaded.model_id == system.model_id
 
+    def test_how_the_em_run_ended_survives_the_archive(
+        self, labelled: list[TrainingRecording], tmp_path: Path
+    ) -> None:
+        """The same defect as ``training_speakers``, one section later.
+
+        §19 added ``n_iterations``, ``final_log_likelihood`` and ``converged``
+        to the PLDA model and recorded that models trained from then on would
+        carry them. They were carried in memory and dropped by the archive, so
+        a model reloaded from disk reported zero iterations and not converged
+        whatever it had actually done — and every model is reloaded before it
+        is ever scored. It was found on a model trained today reporting nought
+        iterations, which is the same shape of mistake and the reason this test
+        exists rather than only the one above.
+        """
+        system = SpeakerComparisonSystem.train(labelled, _tiny_config())
+        described = system.describe()
+        assert described["plda_n_iterations"] >= 1.0
+
+        path = tmp_path / "convergence.npz"
+        system.save(path)
+        reloaded = SpeakerComparisonSystem.load(path).describe()
+
+        assert reloaded["plda_n_iterations"] == described["plda_n_iterations"]
+        assert reloaded["plda_converged"] == described["plda_converged"]
+        assert reloaded["plda_final_log_likelihood"] == pytest.approx(
+            described["plda_final_log_likelihood"]
+        )
+
+    def test_an_archive_without_the_convergence_fields_still_loads(
+        self, labelled: list[TrainingRecording], tmp_path: Path
+    ) -> None:
+        """Five models on disk predate them, and must not become unloadable.
+
+        Zero iterations then reads as unknown rather than none, which is what
+        §19 says about the models in §§4-17.
+        """
+        system = SpeakerComparisonSystem.train(labelled, _tiny_config())
+        path = tmp_path / "old-format.npz"
+        system.save(path)
+
+        with np.load(path, allow_pickle=False) as archive:
+            kept = {
+                name: archive[name]
+                for name in archive.files
+                if not name.startswith(
+                    ("plda_iterations", "plda_final_log_likelihood", "plda_converged")
+                )
+            }
+        np.savez_compressed(path, **kept)
+
+        reloaded = SpeakerComparisonSystem.load(path)
+        assert reloaded.model_id == system.model_id
+        assert reloaded.describe()["plda_n_iterations"] == 0.0
+        assert np.isnan(reloaded.describe()["plda_final_log_likelihood"])
+
 
 class TestEvenlySpaced:
     def test_returns_everything_when_under_budget(self) -> None:
