@@ -39,7 +39,12 @@ from viflap.analysis.patterns import (
     NormalInverseGammaComparator,
 )
 from viflap.analysis.speaker.gmm import GmmConfig, _expectation_step, train_ubm
-from viflap.analysis.speaker.plda import PldaConfig, train_plda
+from viflap.analysis.speaker.plda import (
+    INERT_PSI,
+    PldaConfig,
+    PldaModel,
+    train_plda,
+)
 from viflap.domain.errors import InsufficientDataError, InvalidEvidenceError
 
 SR = 8000
@@ -531,6 +536,66 @@ class TestPldaConvergence:
         model = train_plda(np.array(vectors), np.array(labels), PldaConfig(min_speakers=10))
         assert np.isfinite(model.final_log_likelihood)
         assert model.n_iterations > 1
+
+
+class TestPsiSpectrum:
+    """The back-end health diagnostics, and the one that never fired.
+
+    ``effective_dimension`` tested ``psi > 1e-6`` — a test for exact numerical
+    collapse. It reported every dimension of every model this project trained as
+    healthy, including models carrying 26 to 40 dimensions below ``psi = 0.1``,
+    so the only check on a degenerate speaker subspace passed by construction.
+    """
+
+    @staticmethod
+    def _model(psi: list[float]) -> PldaModel:
+        dimension = len(psi)
+        return PldaModel(
+            mean=np.zeros(dimension),
+            transform=np.eye(dimension),
+            psi=np.array(psi, dtype=float),
+            n_training_speakers=50,
+            n_training_recordings=200,
+        )
+
+    def test_a_dimension_that_barely_separates_speakers_is_not_counted(self) -> None:
+        model = self._model([40.0, 5.0, 1.0, 0.05, 1e-4, 0.0])
+        assert model.dimension == 6
+        assert model.effective_dimension == 3
+
+    def test_the_old_threshold_would_have_called_this_model_healthy(self) -> None:
+        """The regression this constant exists for, stated as the defect."""
+        model = self._model([40.0, 5.0, 1.0, 0.05, 1e-4])
+        assert int(np.count_nonzero(model.psi > 1e-6)) == 5
+        assert model.effective_dimension == 3
+
+    def test_the_threshold_is_absolute_not_relative_to_the_leading_dimension(
+        self,
+    ) -> None:
+        """A useful dimension stays useful however strong its neighbours are.
+
+        ``W = I`` in the diagonalised space, so ``psi`` is a between-to-within
+        variance ratio and means the same thing in every model. Scaling the
+        spectrum's leading dimension must not reclassify the others.
+        """
+        modest = self._model([5.0, 1.0, 0.5])
+        dominated = self._model([500.0, 1.0, 0.5])
+        assert modest.effective_dimension == dominated.effective_dimension == 3
+
+    def test_the_ratio_reports_a_dominant_axis(self) -> None:
+        assert self._model([45.0, 6.4, 1.0]).psi_ratio == pytest.approx(45.0 / 6.4)
+        assert self._model([3.0, 3.0]).psi_ratio == pytest.approx(1.0)
+
+    def test_the_ratio_does_not_assume_the_spectrum_arrives_sorted(self) -> None:
+        assert self._model([1.0, 45.0, 6.4]).psi_ratio == pytest.approx(45.0 / 6.4)
+
+    def test_the_spectrum_reaches_the_diagnostics(self) -> None:
+        diagnostics = self._model([45.0, 6.4, 0.05]).diagnostics()
+        assert diagnostics["psi_1"] == pytest.approx(45.0)
+        assert diagnostics["psi_2"] == pytest.approx(6.4)
+        assert diagnostics["psi_ratio"] == pytest.approx(45.0 / 6.4)
+        assert diagnostics["effective_dimension"] == 2.0
+        assert diagnostics["inert_psi_threshold"] == pytest.approx(INERT_PSI)
 
 
 class TestConjugateComparators:

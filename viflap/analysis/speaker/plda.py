@@ -77,6 +77,17 @@ from viflap.domain.errors import (
 __all__ = ["PldaConfig", "PldaModel", "train_plda"]
 
 
+#: Below this between-speaker variance a diagonalised dimension is treated as
+#: inert. ``W = I`` in that space, so ``psi`` is a between-to-within variance
+#: ratio: at 0.1 the between-speaker standard deviation is under a third of the
+#: within-speaker one, and two recordings of the same person differ along the
+#: dimension by more than two different people do. Such a dimension is not
+#: literally worthless — nothing here removes it from the score — but counting
+#: it as evidence of a healthy subspace is what the previous 1e-6 threshold did,
+#: and that is what this constant exists to stop.
+INERT_PSI = 0.1
+
+
 @dataclass(frozen=True, slots=True)
 class PldaConfig:
     """Training parameters for the two-covariance model."""
@@ -148,14 +159,52 @@ class PldaModel:
 
     @property
     def effective_dimension(self) -> int:
-        """Dimensions carrying meaningful between-speaker variability.
+        """Dimensions carrying enough between-speaker variability to matter.
 
         Dimensions with ``psi`` near zero contribute nothing to any score. Their
         count is a useful diagnostic: if most dimensions are inert, the
         representation is not separating speakers and no amount of calibration
         will fix it.
+
+        .. note::
+
+           This tested ``psi > 1e-6`` until now, which is a test for exact
+           numerical collapse and effectively never fires. It reported 100 of
+           100 dimensions healthy on every model this project has trained,
+           including ones where 26 to 40 dimensions carry ``psi`` below 0.1 —
+           so the one diagnostic meant to detect a degenerate back-end
+           certified every model as sound, and did so by construction rather
+           than by measurement.
+
+        The threshold is absolute rather than relative to ``psi[0]``, and the
+        choice is not arbitrary. In the diagonalised space ``W = I``, so ``psi``
+        *is* the between-speaker variance expressed in units of the
+        within-speaker variance, and it means the same thing in every model
+        regardless of the i-vector scale. A relative threshold would call a
+        dimension inert merely because some other dimension is strong, which is
+        wrong: a dimension with ``psi = 1`` separates speakers usefully whether
+        the leading dimension sits at 5 or at 50.
+
+        See :data:`INERT_PSI` for what the level itself is derived from.
         """
-        return int(np.count_nonzero(self.psi > 1e-6))
+        return int(np.count_nonzero(self.psi > INERT_PSI))
+
+    @property
+    def psi_ratio(self) -> float:
+        """Leading between-speaker variance over the second.
+
+        A spectrum whose first dimension dwarfs its second is the signature of
+        one dominant axis of between-speaker variation — which is what a
+        nuisance factor absorbed into the speaker subspace looks like, since a
+        confound shared across a speaker's recordings is indistinguishable from
+        the speaker as far as the model is concerned. Reported because it is the
+        cheapest available check on that, and because it needs a number beside
+        it rather than an eigenvalue plot nobody generates.
+        """
+        if self.psi.shape[0] < 2:
+            return float("nan")
+        ordered = np.sort(self.psi)[::-1]
+        return float(ordered[0] / ordered[1]) if ordered[1] > 0.0 else float("inf")
 
     def project(self, vectors: NDArray[np.float64]) -> NDArray[np.float64]:
         """Map observations into the diagonalised space."""
@@ -223,11 +272,16 @@ class PldaModel:
 
     def diagnostics(self) -> dict[str, float]:
         """Model properties an analyst needs in order to trust a score."""
+        ordered = np.sort(self.psi)[::-1]
         return {
             "dimension": float(self.dimension),
             "effective_dimension": float(self.effective_dimension),
+            "inert_psi_threshold": float(INERT_PSI),
             "psi_mean": float(np.mean(self.psi)),
             "psi_max": float(np.max(self.psi)),
+            "psi_1": float(ordered[0]),
+            "psi_2": float(ordered[1]) if ordered.size > 1 else float("nan"),
+            "psi_ratio": self.psi_ratio,
             "n_training_speakers": float(self.n_training_speakers),
             "n_training_recordings": float(self.n_training_recordings),
             "n_iterations": float(self.n_iterations),
