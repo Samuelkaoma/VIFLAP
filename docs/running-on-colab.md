@@ -1,10 +1,49 @@
-# Running parts of this on Colab
+# Running parts of this somewhere else
 
 The local development machine has 8 cores, 12 GB of RAM, a 5.4 Mbit/s link, and
 no ffmpeg build carrying AMR-NB. Colab's free tier has roughly 2 cores, the same
 12 GB, about 100 GB of scratch disk, a gigabit link, `apt-get`, and sometimes a
 T4. It is not a faster machine — it is a differently shaped one, and the split
 of work follows from the shape rather than from preference.
+
+## What this network can and cannot reach
+
+Measured rather than assumed, because it decides which jobs can run here at all:
+
+| Host | From the development machine |
+|---|---|
+| `github.com` over SSH via the `github-Personal` alias | works, link flaps, 1–4 attempts |
+| `raw.githubusercontent.com`, `github.com` HTML | works |
+| `pypi.org`, `files.pythonhosted.org` | works |
+| `openslr.org` | works, ~5.4 Mbit/s, intermittent |
+| **`api.github.com`** | **blocked** — no `gh`, no workflow dispatch, no artefact download |
+| **`huggingface.co`** | **blocked** — DNS resolves, HTTPS times out |
+| **`download.pytorch.org`** | **no DNS at all** |
+
+Two consequences follow, and both shaped how the work is now organised.
+
+**Workflows are triggered by a tag, not by the Actions tab.** `api.github.com`
+is unreachable, so neither `gh workflow run` nor the button is available from
+where the work is done. `channel-validation.yml` therefore also triggers on a
+tag matching `channel-validation-*`, which is a deliberate act expressed in the
+one protocol that does work:
+
+```bash
+git tag -a channel-validation-5 -m "why this run exists" && git push origin channel-validation-5
+```
+
+**The result comes back as a commit, and it has to.** Artefacts are fetched
+through `api.github.com`, so an artefact cannot be retrieved from here at all.
+The job commits its report to `main` instead, and — because a run that dies
+before measuring anything would otherwise be indistinguishable from a slow one —
+commits a report saying so when it fails. `git fetch` is the only status channel
+there is.
+
+**A pre-trained embedding extractor cannot be downloaded here.** The SpeechBrain
+VoxCeleb2 checkpoint lives on `huggingface.co`, which this network does not
+reach, and the PyTorch wheel index does not resolve. Torch itself installs from
+PyPI, which does work, so the blocker is the checkpoint rather than the
+framework. See "Importing an extractor" below.
 
 | | Local | Colab free |
 |---|---:|---:|
@@ -107,9 +146,18 @@ token into a cell, or just download the file.
 `.github/workflows/channel-validation.yml` does the same thing with no browser
 and, crucially, **no credentials**: `actions/checkout` uses the automatic per-run
 token, so a private repository needs no personal access token and nothing has to
-be uploaded. Trigger it from the Actions tab; it installs the encoder, fetches a
-deterministic two-speaker sample, measures, commits the report back, and uploads
-it as an artefact as well.
+be uploaded. Push a `channel-validation-*` tag; it installs the encoder, fetches
+a deterministic sixteen-speaker sample, measures, commits the report back, and
+uploads it as an artefact as well.
+
+**`ffmpeg` alone is not enough, and this cost a run to find out.** Debian and
+Ubuntu build libavcodec twice and the default package omits the
+patent-encumbered and GPLv3 codecs, opencore-amr among them. The first run
+installed `ffmpeg`, got a working ffmpeg that could not encode AMR-NB, and
+correctly reported `available: false`. `libavcodec-extra` is the flavour that
+carries it. Ubuntu 24.04's ffmpeg 6.1.1 then lists `libopencore_amrnb` as an
+encoder, which is what the report now records so the next person does not have
+to guess.
 
 The result is the same result, not merely the same kind of one: the same Ubuntu
 ffmpeg package and the same `libopencore-amrnb`, the parametric coder is seeded,
@@ -126,4 +174,50 @@ that was measured.
 Kaggle is the third option and the only one with a real CLI (`kaggle kernels
 push`, `status`, `output`), which makes it the right home for the extractor
 import: 4 cores, ~30 GB RAM, 30 GPU-hours a week, and drivable from a terminal
-rather than a tab.
+rather than a tab. It needs an account and an API token, which is a decision for
+the user rather than something to be arranged on their behalf.
+
+---
+
+## Importing an extractor: what the shape of the machines actually implies
+
+§12 concludes that the move worth making is to take a publicly pre-trained
+VoxCeleb2 embedding extractor and retrain only LDA and PLDA on the 306 speakers
+already on disk. Two things about that are commonly assumed and are wrong here.
+
+**It does not need a GPU.** Training an extractor would; running one over 1,539
+training and 1,039 held-out recordings is inference, and ECAPA-TDNN inference on
+eight cores is a matter of hours rather than days. The GPU tiers matter for
+turnaround, not for feasibility.
+
+**It does need one thing this machine cannot do**, which is fetch the
+checkpoint: `huggingface.co` times out here. That is the whole blocker, and it
+is an 80 MB file.
+
+Which gives the split that follows from the shapes rather than from preference:
+
+| Stage | Where | Why |
+|---|---|---|
+| Fetch the checkpoint | a runner, Colab or Kaggle | the only machines that can reach it |
+| Degrade the corpus | **local** | pure-Python codec, 8 cores against 2–4 |
+| Extract embeddings | either | CPU-bound; local if the checkpoint is here |
+| LDA / PLDA and evaluation | **local** | seconds on 192-dimensional vectors |
+
+The awkward part is the middle, because the corpus is 1.3 GB and gitignored and
+must not move. Two ways round it, and the second is better:
+
+1. **Bring the checkpoint here.** A workflow downloads it and commits it. It is
+   80 MB of binary in a repository that deliberately keeps evidence out of its
+   history, and it is permanent. Simple, and a cost that never goes away.
+2. **Send the embeddings back instead.** A workflow fetches the corpus,
+   degrades, extracts, and commits an `.npz` of embeddings — 2,578 recordings at
+   192 dimensions is about 2 MB. Everything downstream then runs locally with no
+   torch installed at all. The corpus never moves, the checkpoint never lands in
+   the history, and what arrives is exactly the artefact the back-end consumes.
+
+Option 2 costs runner minutes rather than repository weight: the degradation is
+the expensive part and a 2–4 core runner will take one to one and a half hours
+over it, against 26 minutes here. On a private repository that is roughly 90 of
+the 2,000 free minutes a month. It is the right trade the first time; if the
+extractor import becomes iterative, bring the checkpoint here instead and pay
+the 80 MB once.
