@@ -346,6 +346,31 @@ def load_audio(paths: Sequence[Path], max_seconds: float) -> list[NDArray[np.flo
     return signals
 
 
+def align_to(
+    reference: Sequence[NDArray[np.float64]], subject: Sequence[NDArray[np.float64]]
+) -> list[NDArray[np.float64]]:
+    """Remove each subject signal's delay against its own reference.
+
+    Needed because :func:`estimate_delay` searches non-negative lags only, on
+    the physical ground that a codec delays its output rather than anticipating
+    its input. That is right for a coder against its source and wrong for one
+    coder against another: this parametric model returns its output aligned
+    with the input while AMR delays by about 40 samples, so the parametric
+    signal *leads* the reference and the estimator cannot express it. Asked for
+    a non-negative lag it finds the best one available, which is noise — the
+    third run reported a mean delay of 36 samples with a maximum of 106 on a
+    comparison whose true offset is a constant minus 40.
+
+    Both coded signals are therefore aligned to the band-matched source they
+    share before being compared with each other. What remains between them is
+    then coding difference rather than five milliseconds of offset.
+    """
+    aligned: list[NDArray[np.float64]] = []
+    for source, coded in zip(reference, subject, strict=True):
+        aligned.append(coded[estimate_delay(source, coded) :])
+    return aligned
+
+
 def run(
     signals: Sequence[NDArray[np.float64]],
     sample_rate: int,
@@ -420,11 +445,15 @@ def run(
                 bitrate,
             )
         )
+        # Each coder aligned to the source it shares before being compared with
+        # the other — see align_to. The residual delay this comparison then
+        # reports should be near zero, and is worth reading as a check that the
+        # alignment worked rather than as a property of either coder.
         report.comparisons.append(
             compare(
                 f"parametric vs reference @ {bitrate:g}",
-                reference_coded,
-                parametric_coded,
+                align_to(band_matched, reference_coded),
+                align_to(band_matched, parametric_coded),
                 CodecMode.REFERENCE_AMR.value,
                 CodecMode.PARAMETRIC_CELP.value,
                 bitrate,

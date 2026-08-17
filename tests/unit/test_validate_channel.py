@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 
 from scripts.validate_channel import (
+    align_to,
     compare,
     estimate_delay,
     probe_ffmpeg,
@@ -97,6 +98,56 @@ class TestCompare:
     def test_refuses_to_report_a_figure_from_no_frames(self) -> None:
         with pytest.raises(ValueError, match="no comparable frames"):
             compare("empty", [np.zeros(8)], [np.zeros(8)], "a", "b", None)
+
+
+class TestAlignToACommonSource:
+    """One coder against another is where the non-negative lag rule breaks.
+
+    The rule is right for a coder against its source — a codec delays its
+    output, it does not anticipate its input. It is wrong for two coders
+    compared with each other: the parametric model returns its output aligned
+    with the input while AMR delays it, so the parametric signal leads and the
+    estimator has no way to say so. The third workflow run reported a mean
+    delay of 36 samples and a maximum of 106 on a comparison whose true offset
+    is a constant minus 40.
+    """
+
+    def test_a_leading_subject_defeats_the_direct_comparison(self, rng) -> None:
+        """The defect, asserted, so the fix cannot be undone silently."""
+        source = _speechlike(rng)
+        undelayed = source
+        delayed = np.concatenate([np.zeros(40), source])
+
+        # Comparing the delayed one against the undelayed one directly: the
+        # subject leads, so the estimate cannot be right.
+        assert estimate_delay(delayed, undelayed) != 0
+
+    def test_aligning_both_to_the_source_leaves_them_aligned_with_each_other(
+        self, rng
+    ) -> None:
+        source = [_speechlike(rng)]
+        undelayed = [source[0].copy()]
+        delayed = [np.concatenate([np.zeros(40), source[0]])]
+
+        result = compare(
+            "coder vs coder",
+            align_to(source, delayed),
+            align_to(source, undelayed),
+            "a",
+            "b",
+            None,
+        )
+        assert result.mean_delay_samples == pytest.approx(0.0)
+        assert result.mean_spectral_distortion_db == pytest.approx(0.0, abs=1e-6)
+
+    def test_leaves_an_already_aligned_signal_untouched(self, rng) -> None:
+        source = [_speechlike(rng)]
+        assert np.array_equal(align_to(source, [source[0].copy()])[0], source[0])
+
+    def test_removes_exactly_the_delay_it_was_given(self, rng) -> None:
+        source = [_speechlike(rng)]
+        delayed = [np.concatenate([np.zeros(73), source[0]])]
+        assert np.allclose(align_to(source, delayed)[0], source[0])
 
 
 class TestSelectRecordings:
