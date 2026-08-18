@@ -22,7 +22,7 @@ git -C . log --oneline -20
 python -m pytest -q -p no:randomly
 ```
 
-Then read `docs/H1-acoustic-results.md` (~2,400 lines, §§1–21). It is the
+Then read `docs/H1-acoustic-results.md` (~2,900 lines, §§1–22). It is the
 system of record. Every claim in it is either measured or marked withdrawn in
 place; nothing is deleted.
 
