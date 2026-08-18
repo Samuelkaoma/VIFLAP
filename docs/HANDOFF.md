@@ -128,7 +128,35 @@ the like-for-like i-vector column.
 
 ## 3. Running now
 
-**Nothing.** The corrected-gate loop closed: re-extraction (365 min), scoring
+**`python -m scripts.train_countermeasure --train-corpus data/corpus/librispeech
+--train-corpus data/corpus/librispeech-360 --max-train-speakers 300
+--holdout-audio data/corpus/bembaspeech/bem/audio --degrade --output
+models/countermeasure_multicondition.npz --report
+data/reports/countermeasure_multicondition.json`** — the fix for §24. Log:
+`<scratchpad>/train_cm_mc.log`. Attack generation and degradation of ~2,460
+examples through eight conditions, then five GMM fits (full plus four
+leave-one-out); expect **well over an hour**.
+
+Writes to **new paths on purpose**: `countermeasure_english.npz` is what §10 and
+§24's original measurement quote and must stay readable.
+
+When it lands:
+
+1. Re-run `python -m scripts.synthetic_acoustic --countermeasure
+   models/countermeasure_multicondition.npz --output
+   data/reports/synthetic_acoustic_multicondition.json` and compare admission
+   against §24's 0 of 80.
+2. Write the result into §24's "What follows" item 2, which promises it.
+3. Compare the new report's `seen_attacks` and `unseen_attacks` EERs against
+   `countermeasure_english.json` (0.191 seen, 0.246 mean unseen). **Expect them
+   to get worse**, not better — the task is harder through a coder — and that is
+   not a reason to prefer the clean-trained model. §24's point is that the
+   clean-trained model's apparent quality is measured on audio it will never
+   see.
+4. `phase_randomised` should stay near chance (0.526). If it improves, suspect
+   the measurement: LFCCs are magnitude-only and §10's blindness is structural.
+
+The corrected-gate loop before it closed: re-extraction (365 min), scoring
 (16 min) and pairing (25 min) all done, and §22 now reports the VAD-gated run
 throughout with every table verified against its artefact.
 
