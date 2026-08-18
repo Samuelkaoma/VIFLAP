@@ -83,14 +83,17 @@ pretrained/spkrec-ecapa-voxceleb/   ECAPA-TDNN, 89 MB, 192-dim  §22
 Embeddings and reports, all under the gitignored `data/reports/`:
 
 ```
-neural_embeddings.npz      ECAPA over the whole corpus, 6.5 MB  §22
-neural_extraction.json     13 cells, 0 refusals — PRE-GATE-FIX  §22
-h1_neural.json             the §22 result table
+neural_embeddings_vad.npz  ECAPA, corrected gate — WHAT §22 QUOTES  §22
+neural_extraction_vad.json 12 and 73 refusals at 5 s, 0 elsewhere    §22
+h1_neural_vad.json         the §22 result table
+h1_neural_vad_scores.npz   ECAPA per-trial scores (~16 min)
+h1_extractor_paired_vad.json  6/6 identical trial sets, 6/6 Holm    §22
 h1_neural_lda100.json      the §22 dimension control
 h1_pooled_ownership.json   the i-vector baseline §22 compares to
 h1_pooled_scores.npz       i-vector per-trial scores (~43 min)
-h1_neural_scores.npz       ECAPA per-trial scores (~16 min)
-h1_extractor_paired.json   §22's paired difference, 6/6 surviving Holm
+neural_embeddings.npz      SUPERSEDED — the old wall-clock gate
+h1_neural.json             SUPERSEDED — quoted only by §22's correction
+h1_extractor_paired.json   SUPERSEDED — the four-cell pairing
 overstatement.json         §11, 40 replicates, Gaussian, 42-spk marginal
 overstatement_tcopula.json §11, same, Student-t copula
 overstatement_ecapa.json   §11 on §22's marginal — the strong-marginal arm
@@ -99,10 +102,12 @@ psi_spectrum.json          §23, the ψ₁ candidates and the speaker sweep
 afrispeech_survey.json     §8, zero Zambian speakers
 ```
 
-`neural_extraction.json` records zero refusals everywhere, and that is a
-property of the **old** wall-clock gate, not of the corpus — see §5 item 1.
+The three archives marked SUPERSEDED are kept because §22's correction blocks
+quote the before-and-after; **do not delete them and do not quote them as
+current**. `neural_extraction.json` records zero refusals everywhere, which is a
+property of the old wall-clock gate rather than of the corpus.
 `h1_neural_rescored.json` and `h1_pooled_rescored.json` are byproducts of
-generating the score archives and are **not** what any section quotes.
+generating score archives and are **not** what any section quotes.
 
 **Current best is now the borrowed ECAPA extractor with the same 306-speaker
 back-end: `C_llr_min` 0.099 [0.031, 0.230], EER 2.47% at 12.2 kbit/s clean, 30 s,
@@ -120,42 +125,33 @@ the like-for-like i-vector column.
 
 ## 3. Running now
 
-**`python -m scripts.score_neural --embeddings data/reports/neural_embeddings_vad.npz
---extraction-report data/reports/neural_extraction_vad.json --resamples 2000
---output data/reports/h1_neural_vad.json --scores data/reports/h1_neural_vad_scores.npz`**
-— ~16 min. Log: `<scratchpad>/score_vad.log`.
-
-**Re-extraction under the corrected gate is done** (365 min) and the result is
-better than expected. The two front-ends now refuse **exactly the same
-recordings**, which is what the gate's docstring always claimed and never
-delivered:
-
-| Cell | ECAPA refused | i-vector refused | Same recordings? |
-|---|---:|---:|:---:|
-| 30 s, 15 s, both conditions | 0 | 0 | — |
-| evaluation, 5 s clean | **12** | 12 | **yes** |
-| evaluation, 5 s babble 20 dB | **73** | 73 | **yes** |
-
-Checked as set identity, not just counts. So **all six cells become pairable on
-identical trial sets**, where §22 could pair only four.
-
-Next, after the scoring above finishes:
-
-```bash
-python -m scripts.compare_extractors --variant data/reports/h1_neural_vad_scores.npz --output data/reports/h1_extractor_paired_vad.json --resamples 2000
-```
-
-Then update §22: its 30 s and 15 s rows must come out **unchanged** — nothing was
-refused there under either gate, so that is the control on the whole exercise —
-and its 5 s rows change to the survivor subset with the intersection caveat
-dropped.
-
-Per-trial score archives are on disk and are the expensive part —
-**do not regenerate them** unless the trials themselves change:
+**Nothing.** The corrected-gate loop closed: re-extraction (365 min), scoring
+(16 min) and pairing (25 min) all done, and §22 now reports the VAD-gated run
+throughout with every table verified against its artefact.
 
 ```
-h1_pooled_scores.npz   i-vector per-trial scores, evaluate_h1 --scores   (~43 min)
-h1_neural_scores.npz   ECAPA per-trial scores, score_neural --scores     (~16 min)
+neural_embeddings_vad.npz     the corrected-gate corpus  -- what §22 quotes
+neural_extraction_vad.json    12 and 73 refusals at 5 s, 0 elsewhere
+h1_neural_vad.json            the §22 result table
+h1_neural_vad_scores.npz      per-trial scores for pairing
+h1_extractor_paired_vad.json  6/6 on identical trial sets, 6/6 surviving Holm
+```
+
+The pre-registered control held exactly. Training vectors and all four 30 s and
+15 s evaluation cells are **byte-identical** between the two extractions, the
+back-end refits to the same model (ψ₁ 66.98, 35 iterations), and those four
+cells reproduce to machine precision. Only the two 5 s cells moved.
+
+The superseded archives — `neural_embeddings.npz`, `h1_neural.json`,
+`h1_extractor_paired.json` — are kept because §22's correction blocks quote the
+before-and-after. **Do not delete them and do not quote them as current.**
+
+Per-trial score archives, the expensive inputs — **do not regenerate** unless
+the trials themselves change:
+
+```
+h1_pooled_scores.npz      i-vector per-trial scores, evaluate_h1 --scores  (~43 min)
+h1_neural_vad_scores.npz  ECAPA per-trial scores, score_neural --scores    (~16 min)
 ```
 
 The `evaluate_h1` rerun that produced the first doubles as a control: all six
@@ -164,9 +160,9 @@ adding score persistence changed nothing the script computes. Its intervals
 differ in the third decimal (bootstrap noise between runs), so **§22 keeps
 quoting `h1_pooled_ownership.json`**, not `h1_pooled_rescored.json`.
 
-Timings for planning: `extract_neural` 330 min end to end at ~6 s per recording
-per three durations; `score_neural --resamples 2000` 16 min; `evaluate_h1` over
-6 cells ~43 min; `compare_extractors` at B = 2000 about **25 min** and
+Timings for planning: `extract_neural` 330-365 min at ~6-7 s per recording per
+three durations; `score_neural --resamples 2000` 16 min; `evaluate_h1` over
+6 cells ~43 min; `compare_extractors` at B = 2000 about 25 min and
 single-threaded — each resample runs a PAV over 133,645 trials for both systems,
 plus a 102-fold jackknife.
 
@@ -295,21 +291,12 @@ re-deriving. Each is measured, and several are negative results.
 
 ## 5. Open work, in priority order
 
-1. **Re-extract with the corrected speech gate.** `min_speech_seconds` compared
-   wall-clock length against a threshold named for speech; it now runs VAD like
-   the i-vector front-end. §22's embeddings predate the fix. A 120-recording
-   probe says the corrected gate refuses **0% at 30 s and 15 s** — so §22's four
-   supported cells and its four paired differences are untouched — and 1.7% at
-   5 s clean, 12.5% at 5 s babble, close to the i-vector's 2.3% and 14.1%.
-
-   ```bash
-   python -m scripts.extract_neural --output data/reports/neural_embeddings_vad.npz --report data/reports/neural_extraction_vad.json
-   ```
-
-   **Write to those new paths, not over `neural_embeddings.npz`** — §22 quotes
-   the existing archive and it must stay readable. 5.5 hours, then
-   `score_neural` (16 min) and `compare_extractors` (25 min). The prize is
-   pairable 5 s cells, not a change to the headline.
+1. **Put audio on the synthetic pipeline.** `scripts/synthetic_pipeline.py`
+   drives four streams end to end with the real comparators, but not the
+   acoustic one — so `_validity_absence` is never consulted and **the validity
+   gate is still unexercised end to end**. `Operator.acoustic_speaker_id` is the
+   hook: bind operators to real LibriSpeech speakers, embed, register
+   `AcousticStreamComparator`. Heavy, because it needs the corpus and a model.
 
 2. **Make §11's behavioural stream genuinely weaker — with a mechanism that
    works.** Attempting this found that the existing one does not.
@@ -331,14 +318,7 @@ re-deriving. Each is measured, and several are negative results.
    On the evidence above this is the only version of the change that could move
    the result.
 
-3. **Put audio on the synthetic pipeline.** `scripts/synthetic_pipeline.py`
-   drives four streams end to end with the real comparators, but not the
-   acoustic one — so `_validity_absence` is never consulted and **the validity
-   gate is still unexercised end to end**. `Operator.acoustic_speaker_id` is the
-   hook: bind operators to real LibriSpeech speakers, embed, register
-   `AcousticStreamComparator`. Heavy, because it needs the corpus and a model.
-
-4. **Corpus expansion — costed this session, and deliberately not started.**
+3. **Corpus expansion — costed this session, and deliberately not started.**
    510 usable speakers came from a fetch stopped at 41%. Completing
    `train-clean-360` reaches ~761; `train-other-500` adds ~1,100. Three things
    were checked before deciding:
@@ -368,7 +348,7 @@ re-deriving. Each is measured, and several are negative results.
    the extractor delivered. Worth doing eventually; not worth doing before the
    items above it.
 
-5. ~~**Build an abstention mechanism for the neural extractor.**~~ **Largely
+4. ~~**Build an abstention mechanism for the neural extractor.**~~ **Largely
    done, and it was a repair rather than a build.** The claim behind this item —
    that ECAPA "has no notion" of a recording too short to compare — was wrong.
    The gate existed; it measured wall-clock length under a name that promised

@@ -3033,10 +3033,10 @@ of method.
 |---|---:|---|---:|---|---:|:---:|
 | 12.2 kbit/s, clean | 30 s | 0.276 [0.212, 0.383] | 7.89% | **0.099 [0.031, 0.230]** | **2.47%** | **supported** |
 | 12.2 kbit/s, clean | 15 s | 0.349 [0.288, 0.448] | 9.81% | **0.126 [0.064, 0.253]** | **2.83%** | **supported** |
-| 12.2 kbit/s, clean | 5 s | 0.539 [0.479, 0.613] | 16.87% | 0.234 [0.176, 0.341] | 6.01% | inconclusive |
+| 12.2 kbit/s, clean | 5 s | 0.539 [0.479, 0.613] | 16.87% | 0.228 [0.169, 0.335] | 5.78% | inconclusive |
 | 12.2 kbit/s, babble 20 dB | 30 s | 0.295 [0.234, 0.400] | 9.15% | **0.114 [0.041, 0.249]** | **2.59%** | **supported** |
 | 12.2 kbit/s, babble 20 dB | 15 s | 0.370 [0.313, 0.466] | 10.95% | **0.156 [0.089, 0.280]** | **3.65%** | **supported** |
-| 12.2 kbit/s, babble 20 dB | 5 s | 0.514 [0.467, 0.601] | 15.96% | 0.291 [0.230, 0.398] | 7.42% | inconclusive |
+| 12.2 kbit/s, babble 20 dB | 5 s | 0.514 [0.467, 0.601] | 15.96% | 0.252 [0.197, 0.350] | 6.10% | inconclusive |
 
 **Four cells reach `supported`.** Under the rule fixed in §3 — supported if the
 *upper* bound of `C_llr_min` ≤ 0.30 — these are the first supported cells
@@ -3053,10 +3053,10 @@ Calibration is also cheaper, which is a separate finding from discrimination:
 |---|---:|---:|---:|---:|---:|
 | clean | 30 s | 0.336 | **0.138** | 0.060 | **0.039** |
 | clean | 15 s | 0.412 | **0.158** | 0.062 | **0.032** |
-| clean | 5 s | 0.582 | **0.266** | 0.043 | **0.032** |
+| clean | 5 s | 0.582 | **0.264** | 0.043 | **0.035** |
 | babble 20 dB | 30 s | 0.362 | **0.151** | 0.067 | **0.036** |
 | babble 20 dB | 15 s | 0.430 | **0.193** | 0.059 | **0.037** |
-| babble 20 dB | 5 s | 0.551 | **0.319** | 0.037 | **0.028** |
+| babble 20 dB | 5 s | 0.551 | **0.275** | 0.037 | **0.024** |
 
 ### §12's mechanism, confirmed one stage earlier
 
@@ -3102,15 +3102,22 @@ BCa at B = 2000, resampling speakers, Holm over the six cells.
 |---|---:|---:|---:|---|---:|:---:|---|
 | clean | 30 s | 0.276 | 0.099 | **−0.176 [−0.233, −0.141]** | 0.0010 | **✓** | 133,645 identical |
 | clean | 15 s | 0.349 | 0.126 | **−0.223 [−0.275, −0.187]** | 0.0010 | **✓** | 133,645 identical |
-| clean | 5 s | 0.539 | 0.228 | **−0.310 [−0.341, −0.273]** | 0.0010 | **✓** | 127,519 intersection |
+| clean | 5 s | 0.539 | 0.228 | **−0.310 [−0.341, −0.273]** | 0.0010 | **✓** | 127,519 identical |
 | babble 20 dB | 30 s | 0.295 | 0.114 | **−0.180 [−0.224, −0.140]** | 0.0010 | **✓** | 133,645 identical |
 | babble 20 dB | 15 s | 0.370 | 0.156 | **−0.215 [−0.260, −0.175]** | 0.0010 | **✓** | 133,645 identical |
-| babble 20 dB | 5 s | 0.514 | 0.252 | **−0.262 [−0.302, −0.227]** | 0.0010 | **✓** | 98,595 intersection |
+| babble 20 dB | 5 s | 0.514 | 0.252 | **−0.262 [−0.302, −0.227]** | 0.0010 | **✓** | 98,595 identical |
 
-**All six exclude zero and all six survive Holm.** The four cells resting on
-*identical* trial sets — 30 s and 15 s, where neither system refused anything —
-are the ones that carry the claim: −0.176, −0.223, −0.180 and −0.215, every
-interval comfortably clear of zero.
+**All six exclude zero, all six survive Holm, and all six rest on identical
+trial sets.** Artefact: `data/reports/h1_extractor_paired_vad.json`.
+
+> The first version of this table could pair only four. Its 5 s rows were
+> computed on the *intersection* of two differing trial lists, because the
+> neural extractor's speech gate was measuring wall-clock length — see the
+> correction below. With the gate fixed the two systems refuse the same
+> recordings and the intersection is the whole set. **Every difference is
+> unchanged to three decimals**, which is the expected result rather than a
+> lucky one: the intersection already was the correct set, so restricting to it
+> was right for the wrong reason.
 
 Set against §9, where 181 additional training speakers bought −0.104 at the best
 cell and four of six cells survived Holm, borrowing the extractor buys −0.176 at
@@ -3123,18 +3130,19 @@ cell is reporting "below this resampling's resolution" rather than a magnitude.
 They are carried only so Holm has something to consume. The intervals are the
 informative quantity.
 
-**Read the two five-second rows differently from the other four.** The i-vector
-front-end refused recordings there and ECAPA refused none, so only the
-intersection can be paired — 6,126 trials dropped from the neural side at 5 s
-clean and 35,050 at 5 s babble, and none from the i-vector side, which confirms
-the intersection is exactly the i-vector's own trial set. The comparison there is
-therefore on **the recordings the i-vector front-end was willing to embed**.
+**The five-second rows now rest on the same footing as the other four**, and
+getting there measured something §6 had only asserted. Under the corrected gate
+both systems refuse the same 12 recordings at 5 s clean and the same 73 at 5 s
+babble — set identity, checked, not merely equal counts. Dropping those
+recordings improves ECAPA's `C_llr_min` from 0.234 to 0.228 at 5 s clean and from
+0.291 to 0.252 at 5 s babble, so **the refused recordings were indeed the harder
+ones**, which is what §6 says refusal at short duration does and what nothing had
+previously measured.
 
-That subset is measurably easier, which is worth recording because §6 asserted it
-and this measures it: restricted to it, ECAPA's `C_llr_min` at 5 s babble improves
-from 0.291 to 0.252 and at 5 s clean from 0.234 to 0.228. The recordings the
-i-vector system declined were the harder ones, so the two 5 s differences above
-are **understated** — the full-set gap is larger than the paired figure shows.
+It also means the earlier figures for those two cells were computed over a set
+including recordings the system should have declined, and the difference is
+larger in babble (0.039) than in clean (0.006) — as it should be, since babble is
+where net speech falls furthest below wall-clock duration.
 
 ### What this does not establish
 
@@ -3173,38 +3181,39 @@ the code was failing to serve: the gate is retained "so that both extractors
 refuse the same recordings and the comparison between them stays paired".
 
 The gate now measures net speech through the same detector, with tests that fail
-on the old behaviour. **The figures in this section predate that fix** — every
-refusal and trial count above was produced by the wall-clock check, and
-re-measuring properly costs a 5.5-hour re-extraction that has not been run.
+on the old behaviour, and **the corpus has been re-extracted through it** (365
+min). Artefacts: `neural_embeddings_vad.npz`, `neural_extraction_vad.json`,
+`h1_neural_vad.json`, `h1_extractor_paired_vad.json`. Every figure in this
+section is now from that run.
 
-What *has* been run is a probe: 120 evaluation recordings degraded through the
-same two conditions and put to the corrected gate, which costs minutes rather
-than hours because it stops before the network.
+| Cell | Old wall-clock gate | Corrected gate | i-vector front-end |
+|---|---:|---:|---:|
+| 30 s, both conditions | 0 | **0** | 0 |
+| 15 s, both conditions | 0 | **0** | 0 |
+| evaluation, 5 s clean | 0 | **12** | 12 |
+| evaluation, 5 s babble 20 dB | 0 | **73** | 73 |
 
-| Cell | Corrected gate, 120 recordings | i-vector front-end, 518 recordings |
-|---|---:|---:|
-| 30 s, both conditions | **0.0%** | 0.0% |
-| 15 s, both conditions | **0.0%** | 0.0% |
-| 5 s, clean | **1.7%** (2) | 2.3% (12) |
-| 5 s, babble 20 dB | **12.5%** (15) | 14.1% (73) |
+**The two front-ends now refuse exactly the same recordings** — checked as set
+identity, not inferred from equal counts. That is what the gate's docstring has
+always claimed it was for, and it is now true.
 
-Two things follow, and the first matters more than the defect did.
+Three things follow.
 
-**The four cells this section rests on are untouched.** Refusal is zero at 30 s
-and 15 s under both the old check and the corrected one, for both systems. So the
-four `supported` verdicts, the four paired differences on identical trial sets,
-and every trial count at those durations stand exactly as reported. The defect
-could only ever have bitten at 5 s, and that is where it bit.
+**The cells this section rests on are untouched, and provably so.** The training
+vectors and all four 30 s and 15 s evaluation cells are **byte-identical** between
+the two extractions, because nothing was refused there under either gate. The
+back-end refits to the same model (ψ₁ 66.98, 35 iterations), and all four cells
+reproduce to machine precision. The four `supported` verdicts and their four
+paired differences never depended on the defect.
 
-**At 5 s the corrected gate lands close to the i-vector front-end**, which is
-what the docstring said the gate was for. On these rates the two systems would
-refuse comparable fractions rather than 2.3% against nothing, so the intersection
-that cost 6,126 and 35,050 trials would largely close and the 5 s cells would
-become pairable on something near-identical.
+**All six cells are now pairable on identical trial sets**, where before only four
+were. That is the concrete gain.
 
-This is a probe on a sample, not the measurement. It fixes the *direction* and
-the rough size and does not replace re-extracting; the re-run is recorded in the
-handoff.
+**And the paired differences did not move** — unchanged to three decimals in every
+cell. That is the expected outcome rather than a fortunate one: the intersection
+the first version paired on was already exactly the i-vector's trial set, so it
+had been restricting to the right recordings for the wrong reason. The defect cost
+a caveat, not a result.
 
 **We did not control the extractor's training data.** The 102 evaluation speakers
 are LibriVox volunteers and VoxCeleb2 is YouTube celebrity interview audio, so
