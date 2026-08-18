@@ -120,18 +120,35 @@ the like-for-like i-vector column.
 
 ## 3. Running now
 
-**`python -m scripts.extract_neural --output data/reports/neural_embeddings_vad.npz
---report data/reports/neural_extraction_vad.json`** — re-extraction under the
-corrected speech gate, §5 item 1. Started at the head of this file's last
-commit; **5.5 hours**. Log: `<scratchpad>/extract_vad.log`.
+**`python -m scripts.score_neural --embeddings data/reports/neural_embeddings_vad.npz
+--extraction-report data/reports/neural_extraction_vad.json --resamples 2000
+--output data/reports/h1_neural_vad.json --scores data/reports/h1_neural_vad_scores.npz`**
+— ~16 min. Log: `<scratchpad>/score_vad.log`.
 
-It writes to **new paths on purpose**. `neural_embeddings.npz` is what §22
-quotes and must stay readable; nothing in this run may overwrite it.
+**Re-extraction under the corrected gate is done** (365 min) and the result is
+better than expected. The two front-ends now refuse **exactly the same
+recordings**, which is what the gate's docstring always claimed and never
+delivered:
 
-If it is gone and the archive exists, carry on with item 1's next steps. If it
-is gone and the archive does not, just relaunch — the command above is
-idempotent and writes only at the end. **Check before starting anything heavy**;
-it holds 7 workers.
+| Cell | ECAPA refused | i-vector refused | Same recordings? |
+|---|---:|---:|:---:|
+| 30 s, 15 s, both conditions | 0 | 0 | — |
+| evaluation, 5 s clean | **12** | 12 | **yes** |
+| evaluation, 5 s babble 20 dB | **73** | 73 | **yes** |
+
+Checked as set identity, not just counts. So **all six cells become pairable on
+identical trial sets**, where §22 could pair only four.
+
+Next, after the scoring above finishes:
+
+```bash
+python -m scripts.compare_extractors --variant data/reports/h1_neural_vad_scores.npz --output data/reports/h1_extractor_paired_vad.json --resamples 2000
+```
+
+Then update §22: its 30 s and 15 s rows must come out **unchanged** — nothing was
+refused there under either gate, so that is the control on the whole exercise —
+and its 5 s rows change to the survivor subset with the intersection caveat
+dropped.
 
 Per-trial score archives are on disk and are the expensive part —
 **do not regenerate them** unless the trials themselves change:
