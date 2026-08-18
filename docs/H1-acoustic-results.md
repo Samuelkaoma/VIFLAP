@@ -1398,7 +1398,82 @@ is **highest at ρ = 0**, where the streams are independent by construction and
 naive summation is exactly correct. At that point the disagreement is the
 dependence model's error, not the baseline's.
 
+### The conclusion survives a marginal four times stronger
+
+The caveat above — that `calibration_scores.npz` is the superseded 42-speaker
+baseline — is now discharged rather than merely noted. §22's borrowed extractor
+persists its per-trial scores, so the same simulation can be driven from the
+best acoustic marginal this project has, over 102 evaluation speakers instead of
+42. Artefacts: `data/reports/overstatement_ecapa.json` and
+`overstatement_ecapa_tcopula.json`.
+
+| Acoustic marginal | Same-source mean | Different-source mean | Speakers |
+|---|---:|---:|---:|
+| §4/§5 baseline (used above) | +2.24 | −3.92 | 42 |
+| **§22 ECAPA** | **+9.48** | **−6.51** | **102** |
+
+That is roughly four times the separation, and it is the regime a deployment
+built on §22 would actually be in. 40 replicates, marginal resampled over
+speakers, as above.
+
+| ρ | naive sum | **linear-logistic** | Gaussian latent | Latent − linear [95% CI] |
+|---:|---:|---:|---:|---|
+| 0.0 | 0.008 | **0.007** | 0.140 | +0.132 [+0.013, +0.306] |
+| 0.2 | 0.023 | **0.011** | 0.201 | +0.190 [+0.035, +0.438] |
+| 0.4 | 0.051 | **0.020** | 0.288 | +0.268 [+0.087, +0.546] |
+| 0.6 | 0.097 | **0.038** | 0.389 | +0.351 [+0.152, +0.611] |
+| 0.8 | 0.166 | **0.063** | 0.500 | +0.437 [+0.219, +0.686] |
+
+**The conclusion does not merely survive, it sharpens by a factor of four.** The
+dependence model's penalty was +0.019 to +0.110 on the weak marginal and is
++0.132 to +0.437 on the strong one, every interval still excluding zero. Whatever
+was wrong with reporting the old figures, under-stating this was not it.
+
+And under misspecification the same thing happens again, larger:
+
+| ρ | naive sum | **linear-logistic** | Gaussian latent | Latent − linear [95% CI] |
+|---:|---:|---:|---:|---|
+| 0.0 | 0.029 | **0.015** | 0.220 | +0.205 [+0.073, +0.485] |
+| 0.2 | 0.053 | **0.025** | 0.310 | +0.285 [+0.080, +0.545] |
+| 0.4 | 0.085 | **0.035** | 0.392 | +0.357 [+0.168, +0.571] |
+| 0.6 | 0.133 | **0.052** | 0.479 | +0.427 [+0.197, +0.667] |
+| 0.8 | 0.196 | **0.073** | 0.575 | +0.502 [+0.229, +0.737] |
+
+### Naive summation stops being the villain
+
+The more interesting change is in the column nobody was watching. On the weak
+marginal the naive sum cost 0.158 at ρ = 0 against the calibrated model's 0.082 —
+roughly double, which is what made "the cost of not fitting anything" the
+headline. On the strong marginal it costs **0.008 against 0.007**.
+
+That is not a small difference in a small number; it is the effect disappearing.
+Fitting weights buys almost nothing once the marginals separate well, because
+there is very little left for a calibration to repair. Even at ρ = 0.8 the naive
+sum reaches 0.166 where the *dependence model* reaches 0.500 — the method that
+assumes the streams are independent and does not fit anything beats the method
+built to model their dependence, by a factor of three, at the correlation where
+the dependence correction should be most valuable.
+
+**This inverts the practical advice this section has been giving.** The earlier
+reading was that calibration matters more than dependence modelling. On a
+marginal representative of the current system, calibration matters *less* than it
+did and dependence modelling is actively harmful — so for a deployment built on
+§22's extractor, the defensible fusion is the simplest one available.
+
 ### What this still does not establish
+
+The generative parameters are unchanged and still mostly assumed: only the
+acoustic marginal is real, and §13 gives reason to think the behavioural stream
+is weaker than the 0.75 factor used here rather than stronger. Making that
+marginal *more* realistic would widen the gap between streams, and nothing in
+these two runs says what that does to the ordering.
+
+Nor does a stronger marginal make the simulation less of a simulation. §11's
+opening still governs: no figure here is a result, and the reason to run it on
+the ECAPA marginal was to find out whether the *ordering* was an artefact of a
+weak one. It was not.
+
+### What this still does not establish (original)
 
 > **Two items previously listed here have been addressed** and are struck rather
 > than deleted, because both changed what the section can claim. *"Point
@@ -2987,14 +3062,40 @@ with respect to difficulty — they remove the recordings carrying least speech,
 which are the hardest — so the i-vector column at 5 s is scored on an easier
 subset and the gap in those two rows is, if anything, understated.
 
-**Zero refusals is not straightforwardly a virtue.** The i-vector system refuses
-when the posterior is dominated by the prior, which is a designed statement that
-the recording cannot support a comparison. ECAPA has no such notion and returns a
-192-dimensional vector for any input, so the neural system has **no operating
-point at which it says it cannot tell**. Here that confidence happens to be
-earned — it scores better at 5 s while declining to abstain — but a forensic
-deployment needs the abstention, and adopting this extractor means building one
-rather than inheriting it.
+**Zero refusals is not straightforwardly a virtue, and the reason for it was a
+defect.**
+
+> **This paragraph was wrong and is corrected in place.** It said the neural
+> extractor "has no such notion and returns a 192-dimensional vector for any
+> input", and concluded that an abstention mechanism would have to be built.
+> That is not what the code did. `NeuralEmbeddingConfig.min_speech_seconds` has
+> always existed, with the same default of 3.0 as the i-vector front-end and the
+> same name — but it compared `signal.size / sample_rate`, **wall-clock
+> length**, against a threshold named for speech. The i-vector front-end runs
+> voice activity detection first and tests `speech_duration_seconds`. Same name,
+> same default, different quantity.
+
+So the honest statement is not that the neural system cannot abstain. It is that
+it abstained on the wrong criterion, and at these durations that criterion could
+never fire: every truncation is 5 s or longer of wall clock against a 3 s bar, so
+zero refusals was arithmetic rather than confidence. The i-vector front-end
+refused 12 recordings at 5 s clean and 73 at 5 s babble because those carried
+under three seconds of *speech* inside five seconds of audio.
+
+**The consequence was measured in this section before the cause was found.** It
+is exactly why the 5 s cells could not be paired on identical trial sets — 6,126
+and 35,050 trials dropped — and the extractor's own docstring named the purpose
+the code was failing to serve: the gate is retained "so that both extractors
+refuse the same recordings and the comparison between them stays paired".
+
+The gate now measures net speech through the same detector, with tests that fail
+on the old behaviour. **The figures in this section predate that fix**: every
+refusal count and every trial count above was produced by the wall-clock check,
+and re-measuring costs a 5.5-hour re-extraction that has not been run. The
+direction is predictable — the corrected extractor will refuse some 5 s
+recordings, moving its refusals toward the i-vector system's and shrinking the
+intersection problem — but the size is not, and it is not reported here as
+though it were.
 
 **We did not control the extractor's training data.** The 102 evaluation speakers
 are LibriVox volunteers and VoxCeleb2 is YouTube celebrity interview audio, so

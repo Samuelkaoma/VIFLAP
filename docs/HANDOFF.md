@@ -255,11 +255,35 @@ re-deriving. Each is measured, and several are negative results.
    hook: bind operators to real LibriSpeech speakers, embed, register
    `AcousticStreamComparator`. Heavy, because it needs the corpus and a model.
 
-4. **Corpus expansion.** 510 usable speakers came from a fetch stopped at 41%.
-   Completing `train-clean-360` reaches ~761; `train-other-500` adds ~1,100.
-   Bandwidth-bound, not compute-bound. Note §22 weakens the *urgency*: the
-   binding constraint was the extractor's speaker count and that has been
-   bought rather than collected. More speakers now buy back-end quality only.
+4. **Corpus expansion — costed this session, and deliberately not started.**
+   510 usable speakers came from a fetch stopped at 41%. Completing
+   `train-clean-360` reaches ~761; `train-other-500` adds ~1,100. Three things
+   were checked before deciding:
+
+   - **Disk is not the constraint.** The archive is *streamed*, never
+     materialised, and only the selected subset is retained — 4.8 MB per
+     speaker measured on what is already there. Completing `train-clean-360`
+     costs about 2.6 GB and `train-other-500` about 5.3 GB, against 29.5 GB
+     free. The 23 GB figure is transfer, not storage.
+   - **Time is the constraint.** gzip is one continuous stream, so a fetch
+     cannot resume across runs at the member level — only at the byte level
+     within one run. Completing the partial fetch therefore means streaming the
+     whole 23 GB again, roughly 9.5 hours at the ~5.4 Mbit/s this link gives.
+   - **Reproducibility is the real hazard, and it is the reason to stop and
+     think.** `scan_corpora` derives the 306/102/102 split *from the corpus*.
+     Adding 541 speakers to `data/corpus/librispeech-360` changes every split,
+     which silently invalidates the comparability of §9, §22 and §23 against
+     anything computed afterwards. If it is done, fetch into a **new root**
+     (`librispeech-360-full`) and leave the existing one untouched; do not pool
+     the two, and note that `scan_corpora` will refuse the merge anyway because
+     the identifiers overlap.
+
+   **And §22 substantially reduced the value.** The binding constraint was the
+   extractor's speaker count, and that has now been bought with a checkpoint
+   rather than collected. More speakers now buy back-end quality only, which
+   §9 measured at −0.104 for 181 extra speakers against the −0.176 borrowing
+   the extractor delivered. Worth doing eventually; not worth doing before the
+   items above it.
 
 5. **Build an abstention mechanism for the neural extractor.** §22 records that
    ECAPA has no notion of a recording too short to support a comparison — it

@@ -19,11 +19,17 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 
 from viflap.analysis.speaker.neural import (
     NEURAL_EXTRACTOR_RATE,
     prepare_for_extractor,
     resample_to,
+)
+from viflap.domain.errors import InsufficientDataError
+from viflap.infrastructure.neural_extractor import (
+    NeuralEmbeddingConfig,
+    assert_sufficient_speech,
 )
 
 
@@ -98,3 +104,80 @@ class TestPrepareForExtractor:
             for rate in (8_000, 16_000, 22_050, 44_100)
         }
         assert max(sizes) - min(sizes) <= 1
+
+
+class TestTheSpeechGate:
+    """The gate measures speech, not wall clock — which it did not, until now.
+
+    ``min_speech_seconds`` compared ``signal.size / sample_rate`` against a
+    threshold named for speech, so five seconds of near-silence passed a gate the
+    i-vector front-end would have refused. The two systems shared the parameter
+    name and the default and measured different quantities.
+
+    The cost was measured in §22 before the cause was found: its five-second
+    cells could not be paired on identical trial sets, because the i-vector
+    front-end refused 12 and 73 recordings there and this extractor refused none.
+    These tests are what would have caught it.
+    """
+
+    @staticmethod
+    def _speech(seconds: float, rate: int = 16000) -> NDArray[np.float64]:
+        """Something a voice activity detector will call speech.
+
+        Modulated broadband noise rather than a pure tone: the detector keys on
+        energy and spectral movement, and a constant sinusoid is not reliably
+        distinguished from a tone in the background.
+        """
+        rng = np.random.default_rng(4)
+        n = int(seconds * rate)
+        t = np.arange(n) / rate
+        envelope = 0.5 + 0.5 * np.sin(2.0 * np.pi * 3.0 * t)
+        return rng.normal(0.0, 1.0, n) * envelope
+
+    def test_a_recording_of_mostly_silence_is_refused(self) -> None:
+        """The case the old check passed and the i-vector front-end refused.
+
+        Ten seconds of wall clock, one second of speech. Under the old rule this
+        cleared a three-second bar comfortably; it should not.
+        """
+        rate = 16000
+        signal = np.concatenate(
+            [self._speech(1.0, rate), np.zeros(9 * rate)]
+        )
+        assert signal.size / rate == pytest.approx(10.0)
+        with pytest.raises(InsufficientDataError):
+            assert_sufficient_speech(signal, rate, NeuralEmbeddingConfig())
+
+    def test_a_recording_with_enough_speech_passes(self) -> None:
+        rate = 16000
+        measured = assert_sufficient_speech(
+            self._speech(8.0, rate), rate, NeuralEmbeddingConfig()
+        )
+        assert measured >= NeuralEmbeddingConfig().min_speech_seconds
+
+    def test_what_is_returned_is_speech_not_duration(self) -> None:
+        """Silence padding must not inflate the measurement."""
+        rate = 16000
+        padded = np.concatenate([self._speech(8.0, rate), np.zeros(8 * rate)])
+        measured = assert_sufficient_speech(padded, rate, NeuralEmbeddingConfig())
+        assert measured < padded.size / rate - 4.0
+
+    def test_the_threshold_is_configurable(self) -> None:
+        rate = 16000
+        signal = np.concatenate([self._speech(1.0, rate), np.zeros(9 * rate)])
+        # Refused at the default, admitted when the deployment lowers the bar.
+        with pytest.raises(InsufficientDataError):
+            assert_sufficient_speech(signal, rate, NeuralEmbeddingConfig())
+        assert_sufficient_speech(
+            signal, rate, NeuralEmbeddingConfig(min_speech_seconds=0.2)
+        )
+
+    def test_the_default_matches_the_ivector_front_end(self) -> None:
+        """The docstring's stated purpose: both extractors refuse the same
+        recordings, so the comparison between them stays paired."""
+        from viflap.analysis.speaker.pipeline import FrontEndConfig
+
+        assert (
+            NeuralEmbeddingConfig().min_speech_seconds
+            == FrontEndConfig().min_speech_seconds
+        )

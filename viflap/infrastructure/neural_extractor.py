@@ -36,6 +36,8 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
+from viflap.analysis.dsp.framing import FrameConfig
+from viflap.analysis.dsp.vad import VadConfig, detect_voice_activity
 from viflap.analysis.speaker.neural import (
     NEURAL_EXTRACTOR_RATE,
     prepare_for_extractor,
@@ -58,19 +60,67 @@ class NeuralEmbeddingConfig:
     device: str = "cpu"
 
     min_speech_seconds: float = 3.0
-    """Kept from the i-vector front-end, and kept for a *different* reason.
+    """Minimum **net speech**, measured after voice activity detection.
 
-    There the justification is that an i-vector from under three seconds is
-    dominated by its prior, and ``posterior_shrinkage`` measures exactly that. A
-    neural embedding has no prior and no posterior, so that argument does not
-    transfer and must not be quoted as though it did. What remains is empirical:
+    Kept from the i-vector front-end, and kept for a *different* reason. There
+    the justification is that an i-vector from under three seconds is dominated
+    by its prior, and ``posterior_shrinkage`` measures exactly that. A neural
+    embedding has no prior and no posterior, so that argument does not transfer
+    and must not be quoted as though it did. What remains is empirical:
     published verification systems degrade sharply below a few seconds of net
     speech, and §5 measures the same shape here. The gate is retained mainly so
     that both extractors refuse the same recordings and the comparison between
     them stays paired. Its basis is weaker in this module and is stated rather
-    than inherited."""
+    than inherited.
+
+    > **This measured the wrong quantity until now, and the name was the giveaway.**
+    > It compared ``signal.size / sample_rate`` — wall-clock length — against a
+    > threshold called ``min_speech_seconds``, so a five-second clip that was
+    > four seconds of silence passed a gate named for speech. The i-vector
+    > front-end has always run VAD first and tested
+    > ``activity.speech_duration_seconds``. Same parameter name, same default,
+    > different quantity.
+    >
+    > The consequence was measured before the cause was found. §22's five-second
+    > cells could not be paired on identical trial sets because the i-vector
+    > front-end refused 12 and 73 recordings there and this one refused none —
+    > 6,126 and 35,050 trials that had to be dropped from the pairing. The
+    > docstring's own stated purpose, that both extractors refuse the same
+    > recordings, was not being served by the code under it."""
+
+    vad: VadConfig = VadConfig()
+    """The same detector the i-vector front-end uses, so that "three seconds of
+    speech" means one thing across the two systems rather than two."""
 
     n_threads: int = 8
+
+
+def assert_sufficient_speech(
+    signal: NDArray[np.float64], sample_rate: int, config: NeuralEmbeddingConfig
+) -> float:
+    """Refuse a recording carrying too little **speech**, and return how much.
+
+    A free function rather than a method because the gate is the part worth
+    testing and the extractor around it costs an 89 MB checkpoint to construct.
+    A test that has to load a network to find out whether a threshold fires is a
+    test nobody runs, and this gate went unexamined for exactly that reason
+    while it measured the wrong quantity.
+
+    ``detect_voice_activity`` raises ``InsufficientDataError`` itself when there
+    is too little signal to frame at all. That is the same refusal by a
+    different route and is deliberately not caught: converting it to a pass
+    would admit a recording shorter than one analysis window.
+    """
+    frame_config = FrameConfig().with_sample_rate(sample_rate)
+    activity = detect_voice_activity(signal, frame_config, config.vad)
+    if activity.speech_duration_seconds < config.min_speech_seconds:
+        raise InsufficientDataError(
+            "insufficient net speech for a reliable neural embedding",
+            speech_seconds=round(activity.speech_duration_seconds, 2),
+            seconds=round(signal.size / float(sample_rate), 2),
+            required_seconds=config.min_speech_seconds,
+        )
+    return float(activity.speech_duration_seconds)
 
 
 class NeuralEmbeddingExtractor:
@@ -128,13 +178,7 @@ class NeuralEmbeddingExtractor:
         separating speakers.
         """
         signal = np.asarray(signal, dtype=np.float64).ravel()
-        duration = signal.size / float(sample_rate)
-        if duration < self._config.min_speech_seconds:
-            raise InsufficientDataError(
-                "recording is too short for a reliable neural embedding",
-                seconds=round(duration, 2),
-                required_seconds=self._config.min_speech_seconds,
-            )
+        assert_sufficient_speech(signal, sample_rate, self._config)
 
         prepared = prepare_for_extractor(signal, sample_rate)
         tensor = self._torch.from_numpy(
