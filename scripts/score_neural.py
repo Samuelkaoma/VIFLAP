@@ -264,6 +264,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             persisted[f"{cell}|pairs"] = np.array(
                 ["\t".join(pair) for pair in evaluation.pairs], dtype=np.str_
             )
+            # Also under the names `compare_calibrators.py` writes and
+            # `measure_overstatement.py` reads. The duplication is deliberate:
+            # §11 needs a *calibrated* marginal, which needs the development
+            # trials to fit the calibrator on, and reproducing that key
+            # convention here is what lets §11 be re-run against this system
+            # without a loader that knows about two archive layouts.
+            persisted[f"{cell}|eval_scores"] = evaluation.scores
+            persisted[f"{cell}|eval_labels"] = evaluation.labels
+            persisted[f"{cell}|eval_speakers"] = np.array(
+                evaluation.speakers, dtype=np.str_
+            )
 
         c_llr_matched = c_llr_unbounded = calibration_loss = None
         development_key = f"development|{cell}"
@@ -275,6 +286,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 plda,
                 transform,
             )
+            if arguments.scores is not None:
+                persisted[f"{cell}|dev_scores"] = development.scores
+                persisted[f"{cell}|dev_labels"] = development.labels
             try:
                 calibrator = LogisticCalibrator().fit(
                     development.scores, development.labels

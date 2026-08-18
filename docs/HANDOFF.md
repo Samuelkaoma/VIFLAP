@@ -238,14 +238,7 @@ re-deriving. Each is measured, and several are negative results.
 
 ## 5. Open work, in priority order
 
-1. **Place the system on `forensic_eval_01`.** §12's benchmark is an inference
-   across datasets until this is run, and §22 makes it worth measuring properly:
-   the matched `C_llr` of 0.138 now sits in the range of E3FS3's case-specific
-   conditions, which is exactly the best-cell-against-best-condition comparison
-   §12 was rewritten to stop making. The like-for-like figure is 0.208 on a
-   benchmark this system has never been run on.
-
-2. **Re-run §11 against a marginal that is not superseded.** The intervals and
+1. **Re-run §11 against a marginal that is not superseded.** The intervals and
    the t-copula arm are done; what remains is that `calibration_scores.npz` is
    the **42-speaker** §4/§5 baseline evaluation, so the acoustic stream feeding
    the simulation is far weaker than §9's pooled model and much weaker than
@@ -277,9 +270,35 @@ re-deriving. Each is measured, and several are negative results.
 
 ### Blocked on the user
 
-- Common Voice / AfriSpeech-200 usable-speaker counts need `validated.tsv`,
-  behind account creation and terms acceptance. **Do not create accounts or
-  accept terms on their behalf.**
+- **`forensic_eval_01` cannot be obtained without you.** This is the one thing
+  that would turn §12's benchmark from an inference across datasets into a
+  measurement, and §22 makes it worth doing: the matched `C_llr` of 0.138 now
+  sits in the range of E3FS3's case-specific conditions (0.085–0.097), which is
+  exactly the best-cell-against-best-condition comparison §12 was rewritten to
+  stop making. The like-for-like figure is 0.208 and this system has never been
+  run on it.
+
+  Checked this session: the YorVoice catalogue entry
+  (`catalogue.yorvoice.york.ac.uk/catalogue/XRBEJSG2`) is **unreachable — six
+  attempts, all timing out**, so record it as down rather than blocked.
+  `forensic-evaluation.net` **is** reachable and serves the special issue, but
+  publishes no download: obtaining the data runs through contacting the curator
+  and agreeing to the evaluation's rules. That is an email to send and terms to
+  accept, and neither is mine to do on your behalf.
+
+- ~~Common Voice / AfriSpeech-200 usable-speaker counts need `validated.tsv`,
+  behind account creation and terms acceptance.~~ **Half of this was wrong.**
+  AfriSpeech-200 reports `gated=False` and serves its manifests without
+  authentication — three CSVs, 22 MB, no audio and nothing to agree to. It was
+  never blocked and the question is now answered in §8: **zero Zambian
+  speakers**, and one Chichewa speaker who is Malawian. Do not re-open it.
+
+  Common Voice remains genuinely gated: the dataset is a loading script that
+  fetches from Mozilla's CDN behind terms acceptance. **Do not create accounts
+  or accept terms on their behalf** — that restriction stands regardless of what
+  the user has agreed to, because account creation is something I must not do.
+  If the user downloads `validated.tsv` themselves, processing it is ordinary
+  work.
 - Whether UNZA holds an LDC membership. Would unlock Switchboard/Fisher/NIST SRE
   and require rewriting §8.
 - A Kaggle API token exists but is **not configured**, and is not needed: see §6.

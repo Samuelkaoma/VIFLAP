@@ -687,6 +687,68 @@ field takes 4–5 values that look like annotator or text-source hashes. The pap
 counts speakers from the authors' records; the release does not say which
 recording is whose.
 
+### AfriSpeech-200 was never blocked, and contributes nothing
+
+> **A correction to this project's own records.** AfriSpeech-200 was listed as
+> unresolved because its usable-speaker count was thought to sit behind account
+> creation and terms acceptance. It does not. The dataset reports
+> `gated=False`, and its per-utterance manifests are served without
+> authentication: three CSVs, 22 MB in total, no audio and nothing to agree to.
+> The question was answerable at any point and was not asked. Artefact:
+> `data/reports/afrispeech_survey.json`, from `scripts/survey_afrispeech.py`.
+
+67,365 utterances from **2,463 speakers**, which on the hour count is a serious
+resource. Distributed by country:
+
+| Country | Speakers | Usable (≥60 s total) | Hours |
+|---|---:|---:|---:|
+| Nigeria | 1,979 | 1,285 | 141.95 |
+| South Africa | 223 | 147 | 22.63 |
+| Kenya | 137 | 101 | 20.82 |
+| Botswana | 38 | 27 | 3.95 |
+| Ghana | 37 | 31 | 5.15 |
+| Uganda | 26 | 17 | 2.89 |
+| Rwanda | 9 | 6 | 1.47 |
+
+**Zambia does not appear.** Not few speakers — none: zero rows carry `ZM`, and
+the field is present and populated for every other country in the corpus, so
+this is an absence in the data rather than a missing column.
+
+The language view is no better:
+
+| Language | Speakers | Usable | Hours |
+|---|---:|---:|---:|
+| Bemba | **0** | 0 | 0.00 |
+| Nyanja | **0** | 0 | 0.00 |
+| Chichewa | **1** | 1 | 0.15 |
+| Tonga | **0** | 0 | 0.00 |
+| Lozi | **0** | 0 | 0.00 |
+
+Chichewa is the one hit and it is a single speaker with nine minutes of speech,
+who is **Malawian** — Malawi contributes exactly one speaker to the corpus and
+Chichewa exactly one, and they are the same person. Chichewa and Nyanja are the
+same language across a border, so this is the closest AfriSpeech comes to the
+target population: one person, 545 seconds, from the wrong country.
+
+**One speaker is not one speaker short of useful.** A single speaker cannot form
+a same-source trial, cannot contribute to a within-speaker covariance estimate,
+and cannot be split across partitions. §8's Bemba finding was that twelve usable
+speakers is one short of splittable; this is eleven further short of that.
+
+The threshold above is 60 seconds of total speech, which is the floor for two
+30-second recordings — one to enrol, one to test. It is deliberately generous:
+§5 and §22 both measure this system at 30 seconds, and neither suggests a
+speaker contributing exactly two such recordings is worth much. It is a test of
+whether a speaker is splittable at all.
+
+**This strengthens the section's conclusion rather than qualifying it.**
+AfriSpeech-200 is pan-African accented *English* built for clinical speech
+recognition, and it does what it was built for: 141 hours from Nigeria, with
+speaker identity that survives into the release, which is more than any Zambian
+corpus in the table above manages. The identity is there. The population is not.
+Two hundred hours of labelled African speech turns out to contain one speaker
+of one Zambian language, and he lives in Malawi.
+
 ### BIG-C's speaker identifier does not identify a speaker
 
 BIG-C is by far the largest Zambian speech corpus, and on paper the most
