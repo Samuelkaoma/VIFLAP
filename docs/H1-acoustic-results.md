@@ -3089,13 +3089,38 @@ the code was failing to serve: the gate is retained "so that both extractors
 refuse the same recordings and the comparison between them stays paired".
 
 The gate now measures net speech through the same detector, with tests that fail
-on the old behaviour. **The figures in this section predate that fix**: every
-refusal count and every trial count above was produced by the wall-clock check,
-and re-measuring costs a 5.5-hour re-extraction that has not been run. The
-direction is predictable — the corrected extractor will refuse some 5 s
-recordings, moving its refusals toward the i-vector system's and shrinking the
-intersection problem — but the size is not, and it is not reported here as
-though it were.
+on the old behaviour. **The figures in this section predate that fix** — every
+refusal and trial count above was produced by the wall-clock check, and
+re-measuring properly costs a 5.5-hour re-extraction that has not been run.
+
+What *has* been run is a probe: 120 evaluation recordings degraded through the
+same two conditions and put to the corrected gate, which costs minutes rather
+than hours because it stops before the network.
+
+| Cell | Corrected gate, 120 recordings | i-vector front-end, 518 recordings |
+|---|---:|---:|
+| 30 s, both conditions | **0.0%** | 0.0% |
+| 15 s, both conditions | **0.0%** | 0.0% |
+| 5 s, clean | **1.7%** (2) | 2.3% (12) |
+| 5 s, babble 20 dB | **12.5%** (15) | 14.1% (73) |
+
+Two things follow, and the first matters more than the defect did.
+
+**The four cells this section rests on are untouched.** Refusal is zero at 30 s
+and 15 s under both the old check and the corrected one, for both systems. So the
+four `supported` verdicts, the four paired differences on identical trial sets,
+and every trial count at those durations stand exactly as reported. The defect
+could only ever have bitten at 5 s, and that is where it bit.
+
+**At 5 s the corrected gate lands close to the i-vector front-end**, which is
+what the docstring said the gate was for. On these rates the two systems would
+refuse comparable fractions rather than 2.3% against nothing, so the intersection
+that cost 6,126 and 35,050 trials would largely close and the 5 s cells would
+become pairable on something near-identical.
+
+This is a probe on a sample, not the measurement. It fixes the *direction* and
+the rough size and does not replace re-extracting; the re-run is recorded in the
+handoff.
 
 **We did not control the extractor's training data.** The 102 evaluation speakers
 are LibriVox volunteers and VoxCeleb2 is YouTube celebrity interview audio, so

@@ -238,15 +238,31 @@ re-deriving. Each is measured, and several are negative results.
 
 ## 5. Open work, in priority order
 
-1. **Re-run §11 against a marginal that is not superseded.** The intervals and
-   the t-copula arm are done; what remains is that `calibration_scores.npz` is
-   the **42-speaker** §4/§5 baseline evaluation, so the acoustic stream feeding
-   the simulation is far weaker than §9's pooled model and much weaker than
-   §22's borrowed extractor. Regenerating it from a current model is the
-   remaining piece, and §13's benchmark says the behavioural strength factor
-   (0.75 of acoustic) is optimistic too — its forensic operating point is
-   `C_llr` 0.54 at 500 tokens, *worse* than acoustic rather than 75% of it. Both
-   assumptions should move in the same pass.
+1. **Re-extract with the corrected speech gate.** `min_speech_seconds` compared
+   wall-clock length against a threshold named for speech; it now runs VAD like
+   the i-vector front-end. §22's embeddings predate the fix. A 120-recording
+   probe says the corrected gate refuses **0% at 30 s and 15 s** — so §22's four
+   supported cells and its four paired differences are untouched — and 1.7% at
+   5 s clean, 12.5% at 5 s babble, close to the i-vector's 2.3% and 14.1%.
+
+   ```bash
+   python -m scripts.extract_neural --output data/reports/neural_embeddings_vad.npz --report data/reports/neural_extraction_vad.json
+   ```
+
+   **Write to those new paths, not over `neural_embeddings.npz`** — §22 quotes
+   the existing archive and it must stay readable. 5.5 hours, then
+   `score_neural` (16 min) and `compare_extractors` (25 min). The prize is
+   pairable 5 s cells, not a change to the headline.
+
+2. **Give §11 a behavioural marginal that is not optimistic.** The acoustic half
+   is done — the simulation now also runs from §22's ECAPA marginal (+9.48 /
+   −6.51 over 102 speakers) and the ordering sharpened rather than reversing.
+   What is left is the *other* assumption: the behavioural stream is set at 0.75
+   of acoustic separation, and §13's operating point says it should be **worse
+   than acoustic, not 75% of it** — `C_llr` 0.54 at 500 tokens against the
+   acoustic 0.276, or 0.099 under §22. Nothing in the two runs so far says what
+   a properly weak behavioural stream does to the ordering, and that is now the
+   most interesting unknown in the section.
 
 3. **Put audio on the synthetic pipeline.** `scripts/synthetic_pipeline.py`
    drives four streams end to end with the real comparators, but not the
@@ -285,12 +301,16 @@ re-deriving. Each is measured, and several are negative results.
    the extractor delivered. Worth doing eventually; not worth doing before the
    items above it.
 
-5. **Build an abstention mechanism for the neural extractor.** §22 records that
-   ECAPA has no notion of a recording too short to support a comparison — it
-   returns a vector for any input, so unlike the i-vector front-end it has no
-   operating point at which it says it cannot tell. A forensic deployment needs
-   that, and adopting this extractor means building it rather than inheriting
-   it.
+5. ~~**Build an abstention mechanism for the neural extractor.**~~ **Largely
+   done, and it was a repair rather than a build.** The claim behind this item —
+   that ECAPA "has no notion" of a recording too short to compare — was wrong.
+   The gate existed; it measured wall-clock length under a name that promised
+   speech. It now runs the same VAD as the i-vector front-end and a probe says
+   it refuses at comparable rates (item 1). What remains is the genuinely
+   *neural* question that item never asked: net speech is a proxy, and an
+   embedding-space confidence — nearest-neighbour density, or the norm before
+   length normalisation — might abstain better than a duration rule. Nothing
+   here measures whether it would.
 
 ### Blocked on the user
 
