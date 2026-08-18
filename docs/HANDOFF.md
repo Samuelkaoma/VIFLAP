@@ -109,56 +109,29 @@ the like-for-like i-vector column.
 
 ## 3. Running now
 
-**`python -m scripts.compare_extractors --resamples 2000`** — the paired
-difference between the i-vector and ECAPA systems, which is what §22 currently
-lacks. Writes `data/reports/h1_extractor_paired.json`.
+**Nothing.** The paired comparison landed: six of six cells exclude zero and
+survive Holm, and §22 carries it with every row read back off
+`h1_extractor_paired.json`.
 
-If it is no longer running, check whether that artefact exists. If it does, the
-result needs writing into §22 (see below). If it does not, just rerun it — both
-input archives are on disk and the script is the only cheap part:
-
-```bash
-python -m scripts.compare_extractors --resamples 2000
-```
-
-**Both inputs are already generated and verified, and they are the expensive
-part — do not regenerate them.**
+Per-trial score archives are on disk and are the expensive part —
+**do not regenerate them** unless the trials themselves change:
 
 ```
-h1_pooled_scores.npz   i-vector per-trial scores, from evaluate_h1 --scores  (~43 min)
-h1_neural_scores.npz   ECAPA per-trial scores, from score_neural --scores    (~16 min)
+h1_pooled_scores.npz   i-vector per-trial scores, evaluate_h1 --scores   (~43 min)
+h1_neural_scores.npz   ECAPA per-trial scores, score_neural --scores     (~16 min)
 ```
 
-The `evaluate_h1` rerun that produced the first of those doubles as a control:
-all six point estimates reproduce `h1_pooled_ownership.json` to five decimal
-places, so adding score persistence changed nothing the script computes. Its
-intervals differ in the third decimal (bootstrap noise between runs), so **§22
-keeps quoting `h1_pooled_ownership.json`**, not `h1_pooled_rescored.json`.
-
-### What to do with the paired result
-
-`h1_extractor_paired.json` carries, per cell, the difference
-`variant − baseline` on `C_llr_min` with a BCa interval and a p-value, plus a
-Holm decision over the family. **Negative means ECAPA is better.** Write it into
-§22's "What this does not establish", which currently opens by saying the
-comparison is not paired and the direction is not established at a stated
-confidence — that paragraph is what the result replaces.
-
-Two things must survive into the write-up whatever the numbers say:
-
-- **Only the four 30 s and 15 s cells are paired on identical trial sets.** The
-  5 s cells are paired on the *intersection*, which is the subset the i-vector
-  front-end was willing to embed — an easier subset, per §6 — and the artefact
-  records `trial_sets_identical` per cell so this is checkable rather than
-  remembered.
-- **A null is a real possible outcome and must be reported as one.** §22 is
-  written expecting confirmation. If the paired test does not establish the
-  direction, the existing sentence stands and gains a measurement behind it.
+The `evaluate_h1` rerun that produced the first doubles as a control: all six
+point estimates reproduce `h1_pooled_ownership.json` to five decimal places, so
+adding score persistence changed nothing the script computes. Its intervals
+differ in the third decimal (bootstrap noise between runs), so **§22 keeps
+quoting `h1_pooled_ownership.json`**, not `h1_pooled_rescored.json`.
 
 Timings for planning: `extract_neural` 330 min end to end at ~6 s per recording
 per three durations; `score_neural --resamples 2000` 16 min; `evaluate_h1` over
-6 cells ~43 min; `compare_extractors` at B = 2000 is **slow** — each resample
-runs a PAV over 133,645 trials for both systems, plus a 102-fold jackknife.
+6 cells ~43 min; `compare_extractors` at B = 2000 about **25 min** and
+single-threaded — each resample runs a PAV over 133,645 trials for both systems,
+plus a 102-fold jackknife.
 
 ---
 
@@ -199,11 +172,15 @@ re-deriving. Each is measured, and several are negative results.
   i-vector system's 0.276 and 7.89% on the identical trial set. Four of six
   cells reach `supported` — the first anywhere in the document.** This is §12's
   prediction confirmed one stage earlier: only the extractor's speaker count
-  changed, 306 → ~6,000. **The comparison is not paired**, so the direction is
-  not established at a stated confidence; the marginal intervals do overlap
-  slightly and §7 is the standing reminder that overlap decides nothing either
-  way. Control at `--lda-dimension 100` says the result is not an artefact of
-  the 192-dimensional transform.
+  changed, 306 → ~6,000. **Now paired**: differences −0.176 to −0.310, six of
+  six excluding zero and surviving Holm, four of them on trial sets that are
+  identical between the two systems. Against §9, where 181 extra training
+  speakers bought −0.104 and four of six survived Holm, borrowing the extractor
+  buys −0.176 at the same cell and six of six survive. Control at
+  `--lda-dimension 100` says none of it is an artefact of the 192-dimensional
+  transform. Read the two 5 s rows separately — they are paired on the
+  intersection, which is the i-vector front-end's survivor subset and is
+  measurably easier, so those two differences are understated.
 - **§13 (behavioural length)** `MIN_WORDS_IDIOLECT = 500` from Ishihara (2017)
   on predatory chatlog messages; `MIN_WORDS_SCRIPT` stays at 40 and is marked as
   having no citation, because it has none. Two floors, not one — the published
@@ -248,22 +225,20 @@ re-deriving. Each is measured, and several are negative results.
 
 ## 5. Open work, in priority order
 
-1. **Make §22's comparison paired.** This is the largest claim in the document
-   resting on marginal intervals, and §7 exists precisely to say that is not
-   good enough. The trial sets are **identical** at 30 s and 15 s (849
-   same-source, 132,796 different-source in both systems), so
-   `paired_bootstrap_over_speakers` applies directly — the only obstacle is that
-   neither `evaluate_h1.py` nor `score_neural.py` persists per-trial scores.
-   Add that (`compare_calibrators.py` already does it, for the same reason),
-   then run the four cells. Cheap: no re-extraction, no retraining.
-   **Do not pair the 5 s cells** — the i-vector front-end refused 12 and 73
-   recordings there and ECAPA refused none, so the trials do not correspond.
+1. **Rerun §21's ψ₁ question on the ECAPA embeddings.** They are on disk, so
+   this costs minutes and is now the cheapest open question in the project. The
+   extractor changed and the corpus did not: if the spike is a LibriSpeech
+   session effect it should survive; if it is an i-vector length-normalisation
+   artefact it should not. §22 reports ψ₁ = 66.98 but not the ψ₁/ψ₂ *ratio*,
+   which is the comparable quantity — §1's is 5.13 and the range across the five
+   i-vector models is 5.1 to 7.0.
 
-2. **Rerun §21's ψ₁ question on the ECAPA embeddings.** They are on disk, so
-   this costs minutes. The extractor changed and the corpus did not: if the
-   spike is a LibriSpeech session effect it should survive; if it is an i-vector
-   length-normalisation artefact it should not. §22 reports ψ₁ = 66.98 but not
-   the ψ₁/ψ₂ *ratio*, which is the comparable quantity.
+2. **Place the system on `forensic_eval_01`.** §12's benchmark is an inference
+   across datasets until this is run, and §22 makes it worth measuring properly:
+   the matched `C_llr` of 0.138 now sits in the range of E3FS3's case-specific
+   conditions, which is exactly the best-cell-against-best-condition comparison
+   §12 was rewritten to stop making. The like-for-like figure is 0.208 on a
+   benchmark this system has never been run on.
 
 3. **Re-run §11 against a marginal that is not superseded.** The intervals and
    the t-copula arm are done; what remains is that `calibration_scores.npz` is
@@ -288,9 +263,12 @@ re-deriving. Each is measured, and several are negative results.
    binding constraint was the extractor's speaker count and that has been
    bought rather than collected. More speakers now buy back-end quality only.
 
-6. **Place the system on `forensic_eval_01`.** §12's benchmark is an inference
-   across datasets until this is run, and §22 makes the gap worth measuring
-   properly rather than narrating.
+6. **Build an abstention mechanism for the neural extractor.** §22 records that
+   ECAPA has no notion of a recording too short to support a comparison — it
+   returns a vector for any input, so unlike the i-vector front-end it has no
+   operating point at which it says it cannot tell. A forensic deployment needs
+   that, and adopting this extractor means building it rather than inheriting
+   it.
 
 ### Blocked on the user
 

@@ -2859,18 +2859,63 @@ does show is that the *reachable* move — buying 6,000 speakers with a checkpoi
 download rather than a collection programme — delivers, and delivers more than any
 change made to this system so far.
 
-### What this does not establish
+### The paired difference, which is what actually decides this
 
-**The comparison is not paired, and the direction is not established at a stated
-confidence.** §7 and §9 bootstrapped the *paired* difference over speakers,
-because reading marginal overlap as "no difference" manufactures a null. The same
-warning runs the other way: these marginal intervals do overlap slightly — clean
-30 s is [0.212, 0.383] against [0.031, 0.230] — and non-overlap was never the
-test. A paired test **is** available in principle for the four 30 s and 15 s
-cells, where the two systems scored an identical trial set (849 same-source and
-132,796 different-source in both), and it was not run only because neither
-`evaluate_h1.py` nor `score_neural.py` persists per-trial scores. That is a
-missing run, not a missing possibility, and it is the first thing to do next.
+> **This subsection replaces a caveat.** The first version of §22 reported the
+> two systems' marginal intervals side by side and said plainly that the
+> comparison was not paired, so the direction was not established at a stated
+> confidence. It now is. Artefact: `data/reports/h1_extractor_paired.json`.
+
+Marginal intervals were never going to settle it. Both are wide because
+*speakers differ from one another*, and both systems saw the same speakers — so
+most of that width is common and cancels in a difference. §7 records that reading
+marginal overlap as "no difference" manufactures a null; the converse is equally
+untrue, and clean 30 s does overlap, [0.212, 0.383] against [0.031, 0.230].
+
+Both scorers now persist per-trial scores with the **recording-id pair** behind
+each trial, so the two systems' trials can be joined rather than assumed aligned.
+Difference is `ECAPA − i-vector` on `C_llr_min`, so **negative favours ECAPA**.
+BCa at B = 2000, resampling speakers, Holm over the six cells.
+
+| Condition | Dur. | i-vector | ECAPA | Difference [95% CI] | p | Holm | Trials |
+|---|---:|---:|---:|---|---:|:---:|---|
+| clean | 30 s | 0.276 | 0.099 | **−0.176 [−0.233, −0.141]** | 0.0010 | **✓** | 133,645 identical |
+| clean | 15 s | 0.349 | 0.126 | **−0.223 [−0.275, −0.187]** | 0.0010 | **✓** | 133,645 identical |
+| clean | 5 s | 0.539 | 0.228 | **−0.310 [−0.341, −0.273]** | 0.0010 | **✓** | 127,519 intersection |
+| babble 20 dB | 30 s | 0.295 | 0.114 | **−0.180 [−0.224, −0.140]** | 0.0010 | **✓** | 133,645 identical |
+| babble 20 dB | 15 s | 0.370 | 0.156 | **−0.215 [−0.260, −0.175]** | 0.0010 | **✓** | 133,645 identical |
+| babble 20 dB | 5 s | 0.514 | 0.252 | **−0.262 [−0.302, −0.227]** | 0.0010 | **✓** | 98,595 intersection |
+
+**All six exclude zero and all six survive Holm.** The four cells resting on
+*identical* trial sets — 30 s and 15 s, where neither system refused anything —
+are the ones that carry the claim: −0.176, −0.223, −0.180 and −0.215, every
+interval comfortably clear of zero.
+
+Set against §9, where 181 additional training speakers bought −0.104 at the best
+cell and four of six cells survived Holm, borrowing the extractor buys −0.176 at
+the same cell and **six of six survive**. The move §12 recommended is larger than
+the corpus expansion that motivated it.
+
+**The p-values are at the floor and should not be read as values.** 0.0010 is
+2/B at B = 2000, the smallest a two-sided bootstrap p-value can be here, so every
+cell is reporting "below this resampling's resolution" rather than a magnitude.
+They are carried only so Holm has something to consume. The intervals are the
+informative quantity.
+
+**Read the two five-second rows differently from the other four.** The i-vector
+front-end refused recordings there and ECAPA refused none, so only the
+intersection can be paired — 6,126 trials dropped from the neural side at 5 s
+clean and 35,050 at 5 s babble, and none from the i-vector side, which confirms
+the intersection is exactly the i-vector's own trial set. The comparison there is
+therefore on **the recordings the i-vector front-end was willing to embed**.
+
+That subset is measurably easier, which is worth recording because §6 asserted it
+and this measures it: restricted to it, ECAPA's `C_llr_min` at 5 s babble improves
+from 0.291 to 0.252 and at 5 s clean from 0.234 to 0.228. The recordings the
+i-vector system declined were the harder ones, so the two 5 s differences above
+are **understated** — the full-set gap is larger than the paired figure shows.
+
+### What this does not establish
 
 **The five-second rows are not on the same trials.** The i-vector front-end
 refused 12 recordings at 5 s clean and 73 at 5 s babble; ECAPA refused none. So
@@ -2970,9 +3015,12 @@ too few speakers, and borrowing the extractor is precisely what removes it.
 
 ### What follows
 
-1. **Run the paired difference test** on the four cells with identical trial sets.
-   Both scripts need to persist per-trial scores first, which
-   `compare_calibrators.py` already does and for the same reason.
+1. ~~**Run the paired difference test** on the four cells with identical trial
+   sets.~~ **Done** — see "The paired difference" above. Six of six cells exclude
+   zero and survive Holm. `TrialSet` now carries the recording-id pair behind
+   each trial, both scorers take `--scores`, and `compare_extractors.py` joins on
+   that key rather than on row index, which two differently ordered archives
+   would have made silently wrong.
 2. **Rerun §21's ψ₁ question against these embeddings.** The extractor changed and
    the corpus did not; if the spike is a LibriSpeech session effect it should
    survive, and if it is an i-vector length-normalisation artefact it should not.
