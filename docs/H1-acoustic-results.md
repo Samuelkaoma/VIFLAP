@@ -1179,11 +1179,23 @@ Three things keep it grounded:
 **The acoustic marginal is measured, not invented.** Same-source and
 different-source log-LRs are resampled from the 25,088 real evaluation trials in
 `calibration_scores.npz`, calibrated as the system calibrates — fitted on
-development speakers, applied to evaluation speakers. Same-source mean +1.98
-against different-source −12.44. Draws are mapped onto that empirical
+development speakers, applied to evaluation speakers. Same-source mean **+2.24**
+against different-source **−3.92**, in nats. Draws are mapped onto that empirical
 distribution by quantile, so its asymmetry and its tails survive; fitting a
 normal instead would smooth away exactly the region an overstatement study lives
 in.
+
+> **These two numbers were wrong until now, and wrongly in a way this section
+> had already diagnosed elsewhere.** They read "+1.98 against −12.44", which are
+> the means of the **unbounded** calibrator output — precisely the quantity the
+> correction block below says this section stopped using. When the result table
+> was recomputed with `calibrate` in place of `transform`, this sentence was not,
+> so the paragraph asserting that the marginal is what a deployment would emit
+> was quoting a marginal running to −16.1 log₁₀ against bounds of ±[−2.35, 3.64].
+> The bounded means are +2.24 and −3.92 nats (+0.97 and −1.70 log₁₀). **No
+> reported figure moves**: every number in the result table was already computed
+> from the bounded marginal, which is why the error survived — it was in the
+> prose only.
 
 **The dependence mechanism is the documented one.** `EvidenceStream` states the
 streams "are *not* conditionally independent of one another — the same operator
@@ -1212,15 +1224,94 @@ curve over plausible values says more than one number from a guess.
 Three fusion models rather than two — the middle one still assumes independence
 but fits its weights, which is what separates the two effects.
 
+> **This table now carries intervals, and the previous version's point estimates
+> are superseded.** It reported one seed per level: 0.148 / 0.077 / 0.105 at
+> ρ = 0, rising to 0.538 / 0.335 / 0.491 at ρ = 0.8. Every one of those values
+> falls inside the intervals below, so nothing is retracted — but they were
+> quoted to three decimals from a single draw, and the intervals show how little
+> that precision meant. Artefact: `data/reports/overstatement.json`.
+
+**40 independent replicates per level**, with the acoustic marginal **resampled
+over its 42 evaluation speakers** in each. Both sources of variation matter and
+only one of them is about the simulation: holding the marginal fixed would treat
+an estimate from 42 speakers as the population, which is the error §2 rejects for
+every other interval in this document. Intervals are 95% Monte-Carlo over
+replicates — the replicates are genuinely independent, so their spread *is* the
+sampling distribution and bootstrapping them would only add noise.
+
 | ρ | naive sum | **linear-logistic** (independent, calibrated) | Gaussian latent (dependence) | Band changes |
-|---:|---:|---:|---:|---:|
-| 0.0 | 0.148 | **0.077** | 0.105 | 92.6% |
-| 0.2 | 0.230 | **0.147** | 0.200 | 76.6% |
-| 0.4 | 0.317 | **0.213** | 0.294 | 58.5% |
-| 0.6 | 0.415 | **0.275** | 0.388 | 42.4% |
-| 0.8 | 0.538 | **0.335** | 0.491 | 63.4% |
+|---:|---|---|---|---:|
+| 0.0 | 0.158 [0.032, 0.316] | **0.082 [0.019, 0.154]** | 0.100 [0.023, 0.155] | 87.8% |
+| 0.2 | 0.238 [0.066, 0.482] | **0.149 [0.057, 0.257]** | 0.190 [0.082, 0.273] | 81.9% |
+| 0.4 | 0.331 [0.113, 0.637] | **0.214 [0.105, 0.335]** | 0.279 [0.154, 0.365] | 70.9% |
+| 0.6 | 0.437 [0.171, 0.821] | **0.275 [0.154, 0.405]** | 0.363 [0.226, 0.450] | 61.6% |
+| 0.8 | 0.555 [0.240, 1.000] | **0.331 [0.203, 0.463]** | 0.442 [0.300, 0.531] | 65.2% |
 
 Values are `C_llr`; lower is better.
+
+**The intervals are enormous, and that is the first finding.** At ρ = 0 the naive
+sum spans [0.032, 0.316] — a factor of ten. Almost all of that width comes from
+resampling 42 speakers, not from the 4,000 simulated incidents, and it means the
+marginal figures in the old table were about as precise as their third decimal
+suggested they were not. Any statement of the form "naive summation costs 0.148"
+was never supportable from this experiment.
+
+### The comparison had to be paired, exactly as in §7
+
+Those marginal intervals overlap almost completely, and reading that as "the
+models are indistinguishable" would manufacture a null — the same error §7 was
+written to avoid. Every arm within one replicate sees the *same* simulated
+incidents and the *same* resampled marginal, so nearly all of that width is
+common to them and cancels in a difference. Differenced within replicate,
+`gaussian_latent − linear_logistic`, positive meaning the dependence model is
+**worse**:
+
+| ρ | Gaussian latent − linear-logistic [95% CI] | Excludes zero |
+|---:|---|:---:|
+| 0.0 | +0.019 [+0.001, +0.049] | ✓ |
+| 0.2 | +0.041 [+0.013, +0.075] | ✓ |
+| 0.4 | +0.065 [+0.023, +0.112] | ✓ |
+| 0.6 | +0.088 [+0.030, +0.157] | ✓ |
+| 0.8 | +0.110 [+0.028, +0.183] | ✓ |
+
+**All five exclude zero, and the penalty grows with dependence.** The dependence
+model is significantly worse than the independence-assuming model that fits its
+weights, at every level of dependence tested — including the levels where the
+correction is supposed to earn its place. The previous version asserted this from
+point estimates; it is now measured.
+
+### Misspecification makes it worse, not better
+
+The obvious objection to the above is that the generative process was a Gaussian
+latent factor and the dependence model is a Gaussian latent-factor model, so the
+comparison was the correction's best case. The honest operational case is
+misspecification: real streams fail *together*, and a Gaussian copula has no
+parameter for that at any correlation.
+
+Rerun with the same linear correlation imposed through a **Student-t copula**
+(ν = 4) — one chi-square draw per incident, shared across its streams, which is
+what produces joint tail dependence. The fitted models are unchanged, so this arm
+is misspecified by construction. Artefact:
+`data/reports/overstatement_tcopula.json`.
+
+| ρ | naive sum | **linear-logistic** | Gaussian latent | Latent − linear [95% CI] |
+|---:|---|---|---|---|
+| 0.0 | 0.190 | **0.119** | 0.166 | +0.047 [+0.012, +0.090] |
+| 0.2 | 0.268 | **0.176** | 0.240 | +0.064 [+0.025, +0.120] |
+| 0.4 | 0.355 | **0.231** | 0.312 | +0.081 [+0.038, +0.157] |
+| 0.6 | 0.453 | **0.284** | 0.382 | +0.099 [+0.041, +0.183] |
+| 0.8 | 0.562 | **0.334** | 0.454 | +0.119 [+0.043, +0.214] |
+
+**Every arm degrades under misspecification, and the dependence model degrades
+fastest.** Its penalty relative to the calibrated independence model widens at
+every level — most sharply at ρ = 0, where it more than doubles from +0.019 to
++0.047. Tail dependence hurts the model that is supposed to be modelling
+dependence more than it hurts the model that ignores it.
+
+That is not the result this arm was added to find. It was added because
+correct-specification-by-construction made the dependence model's defeat
+uninformative; the expectation was that misspecification would narrow the gap or
+reverse it. It widened it.
 
 **Calibration buys more than the dependence correction does, at every level of
 dependence.** Fitting weights while still assuming independence takes `C_llr`
@@ -1247,19 +1338,30 @@ dependence model's error, not the baseline's.
 
 ### What this still does not establish
 
-**Point estimates from one seed, with no intervals**, which remains inconsistent
-with the rest of this document and with §14's treatment of the acoustic
-intervals. Repeating across seeds is required before any figure here is quoted
-as a result.
+> **Two items previously listed here have been addressed** and are struck rather
+> than deleted, because both changed what the section can claim. *"Point
+> estimates from one seed, with no intervals"* — now 40 replicates with the
+> marginal resampled over speakers, and the intervals turned out to be wide
+> enough that the marginal figures should never have been quoted to three
+> decimals. *"Correct specification by construction"* — now tested against a
+> t-copula, which widened the dependence model's penalty instead of narrowing it.
 
-**Correct specification by construction.** The generative process is a Gaussian
-latent factor and the dependence model is a Gaussian latent-factor model, so the
-comparison is the best case for the correction — and it loses anyway. Testing
-misspecification (generate under a t-copula, fit the Gaussian) would make the
-result stronger, and would be the honest operational case.
+**The marginal is from the superseded 42-speaker model.**
+`calibration_scores.npz` holds the §4/§5 baseline evaluation, not §9's pooled
+system and certainly not §22's borrowed extractor. So the acoustic stream feeding
+this simulation is materially weaker than the system's current best — same-source
+mean +2.24 nats against different-source −3.92, where §22's extractor separates
+far better. Whether the conclusion survives a stronger marginal is untested and
+is now cheap to test.
 
 **Only the acoustic marginal is real**, and §13 gives reason to think the
-behavioural stream is weaker than the 0.75 factor assumed here.
+behavioural stream is weaker than the 0.75 factor assumed here — its forensic
+operating point puts `C_llr` at 0.54 for 500-token transcripts, which is worse
+than the acoustic stream rather than 0.75 of it.
+
+**Dominated is not useless.** The dependence model beats the naive sum at every
+level under both copulas. The finding is that a simpler model beats it too, not
+that modelling dependence is wrong in principle.
 
 **The true ρ is unknown.** The curve says where the models separate; it does not
 say where this system sits on it.

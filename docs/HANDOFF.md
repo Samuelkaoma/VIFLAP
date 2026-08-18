@@ -45,7 +45,7 @@ powershell -Command "Get-CimInstance Win32_Process -Filter 'Name=\"python.exe\"'
 
 | | |
 |---|---|
-| Tests | **700, all passing** |
+| Tests | **728, all passing** |
 | ruff | clean (`viflap scripts tests`) |
 | mypy | **63 errors on `viflap`** — pre-existing baseline, not a regression |
 | Git | clean, all pushed, `main` |
@@ -89,6 +89,8 @@ neural_extraction.json    13 cells, 0 refusals anywhere         §22
 h1_neural.json            the §22 result table
 h1_neural_lda100.json     the §22 dimension control
 h1_pooled_ownership.json  the i-vector baseline §22 compares to
+overstatement.json        §11, 40 replicates, Gaussian copula
+overstatement_tcopula.json §11, 40 replicates, Student-t copula
 ```
 
 **Current best is now the borrowed ECAPA extractor with the same 306-speaker
@@ -166,6 +168,17 @@ re-deriving. Each is measured, and several are negative results.
   idiolect half. Below the floor the idiolect term is **withheld**, and that
   required a guard: with idiolect pinned at zero the delegation flag fires on
   anything with script evidence, including a transcript compared with itself.
+- **§11** Now 40 replicates per level with the acoustic marginal resampled over
+  speakers, plus a Student-t copula arm for misspecification. Two findings. The
+  marginal intervals are **enormous** — the naive sum spans [0.032, 0.316] at
+  ρ = 0 — and nearly all that width is the 42 speakers, not the 4,000 incidents,
+  so the old three-decimal point estimates were never supportable. Differenced
+  **within replicate**, §7-style, the Gaussian latent model is worse than the
+  calibrated independence model at every level (+0.019 to +0.110, all five
+  excluding zero). Misspecification **widened** that penalty rather than
+  narrowing it. Also fixed: the section described its marginal as "+1.98 /
+  −12.44", the *unbounded* means it had already announced it stopped using; the
+  bounded ones are +2.24 / −3.92 nats and no reported figure moved.
 - **§21** Condition stratification works as designed (speakers with a repeated
   condition 75.2% → 0%, per-speaker mean-bitrate SD 1.42 → 0.66 kbit/s) and
   **ψ₁ moved only 44.951 → 43.967**. The condition confound is **refuted** as
@@ -209,12 +222,15 @@ re-deriving. Each is measured, and several are negative results.
    length-normalisation artefact it should not. §22 reports ψ₁ = 66.98 but not
    the ψ₁/ψ₂ *ratio*, which is the comparable quantity.
 
-3. **§11 has no intervals.** Point estimates from one seed in a document that
-   insists on intervals everywhere. Repeat across seeds and bootstrap before
-   quoting any figure. Also test misspecification — generate under a t-copula,
-   fit the Gaussian. §13's benchmark says the behavioural marginal used there
-   (0.75 of acoustic separation) is probably optimistic, and that should move in
-   the same pass.
+3. **Re-run §11 against a marginal that is not superseded.** The intervals and
+   the t-copula arm are done; what remains is that `calibration_scores.npz` is
+   the **42-speaker** §4/§5 baseline evaluation, so the acoustic stream feeding
+   the simulation is far weaker than §9's pooled model and much weaker than
+   §22's borrowed extractor. Regenerating it from a current model is the
+   remaining piece, and §13's benchmark says the behavioural strength factor
+   (0.75 of acoustic) is optimistic too — its forensic operating point is
+   `C_llr` 0.54 at 500 tokens, *worse* than acoustic rather than 75% of it. Both
+   assumptions should move in the same pass.
 
 4. **Put audio on the synthetic pipeline.** `scripts/synthetic_pipeline.py`
    drives four streams end to end with the real comparators, but not the
