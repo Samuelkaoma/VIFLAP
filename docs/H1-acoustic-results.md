@@ -3508,3 +3508,125 @@ about its absolute value has to carry that.
 
 **No corpus-crossed control was run**, because none is available here. The
 mechanism above is argued from how LibriVox is recorded, not measured.
+
+---
+
+## 24. The validity gate, reached at last, admits nothing
+
+Every test of the validity gate in this project has driven it through a
+hand-built `ValidityAssessment`. That is not an oversight of testing but a
+consequence of structure: `CompareIncidents._validity_absence` consults the
+assessment only for streams where `is_gated_by_validity` holds, which is the
+acoustic stream alone, and the synthetic corpus deliberately synthesises no
+speech. With no acoustic payload the gate is unreachable.
+
+`scripts/synthetic_acoustic.py` closes that by filling in the hook the corpus has
+carried since it was written — `Operator.acoustic_speaker_id` — binding each
+synthetic operator to a distinct held-out LibriSpeech speaker, hearing every
+incident as one of that speaker's recordings through the 12.2 kbit/s channel, and
+putting **the same degraded signal** to both the i-vector system and the trained
+countermeasure. Artefact: `data/reports/synthetic_acoustic.json`.
+
+What is real here is the audio, the channel, the extractor, the countermeasure
+and the policy. What is invented is everything else about the incident, and the
+binding between an operator and a speaker is arbitrary. So the acoustic stream is
+a measurement and any fused figure remains a simulation; §11's boundary governs.
+
+### The result
+
+80 incidents, 18 operators, model `ivec-plda-d5023efe82508a33`, detector
+`lfcc-gmm-b23145edfcacf976`, default `GatePolicy`.
+
+| | |
+|---|---:|
+| Recordings judged | 80 |
+| **Admitted** | **0** |
+| Indeterminate | 79 |
+| Excluded | 1 |
+
+**The gate admits none of eighty genuine human recordings.** Not one.
+
+### Why, and it is not the domain check
+
+The obvious explanation is the out-of-domain rule — §10 established that the
+countermeasure generalises poorly, and `INDETERMINATE` is what the policy returns
+when too many frames fall outside the training domain. That is not what happened.
+Measured over the same recordings:
+
+| Quantity | Observed | Policy threshold | Fires? |
+|---|---|---:|:---:|
+| Out-of-domain fraction | 0.000–0.018 | > 0.25 | no |
+| Dispersion ratio | 0.224–0.262 | > 2.5 | no |
+| Countermeasure log-LR | **−2.33 to +1.60** | ≥ **+2.30** to admit | **never** |
+
+Both domain checks pass comfortably — by an order of magnitude. The verdict is
+decided by the threshold, and **the detector's scores on genuine speech never
+reach it**. The maximum observed over eighty recordings is +1.60 against a bar of
++2.30; the median is −0.21. One recording fell below −2.30 and was excluded, so
+the only confident verdict the gate issued on genuine audio was a wrong one.
+
+### The mechanism is a mismatch between a policy and a detector
+
+`GatePolicy` documents its band as reading directly as a strength of evidence:
+`admit_above = 2.3` means "about ten times more probable under the genuine
+model". That is a defensible thing for a forensic policy to demand. It is not
+something this detector can supply.
+
+§12 benchmarks the countermeasure at **16.41% EER in domain**, roughly twice the
+published GMM baseline, on twelve training speakers and 32 mixture components. A
+detector at that error rate produces log-likelihood ratios concentrated near
+zero: it separates the classes weakly, so it cannot express strong evidence for
+either. Asking it for ±2.3 is asking for a discrimination it does not have. The
+threshold and the detector were specified independently and never met until now.
+
+**Neither component is individually wrong.** The policy is a reasonable forensic
+operating point. The detector is an unremarkable GMM baseline, and §12 records
+that its weakness is understood. What is wrong is the composition, and
+composition is invisible to a unit test of either part.
+
+### What this means for a deployment
+
+The gate is **fail-safe in direction and inoperable in effect**. It withholds
+acoustic evidence rather than admitting a spoof, which is the right way round —
+but at this operating point it withholds *all* acoustic evidence, including from
+the stream §22 just measured at `C_llr_min` 0.099. A deployment assembled from
+these parts would run with its best-performing stream silently absent, reported
+correctly as `INDETERMINATE` on every incident and therefore never wrong,
+and never useful.
+
+That is worth stating plainly because it is the failure mode this architecture is
+otherwise good at avoiding. Nothing here is a silent error: the result carries
+`rests_on_single_stream`, the outcome is a `StreamAbsent` with
+`EXCLUDED_BY_VALIDITY_GATE` or `NO_DATA`, and the audit record names the policy.
+The system reports exactly what it did. It simply does nothing useful with the
+acoustic stream.
+
+### What follows
+
+1. **Do not fix this by lowering the threshold.** A band chosen to match a weak
+   detector's output range would admit recordings on evidence of ±0.5, which is
+   the number the policy exists to refuse. The threshold is not the defect.
+2. **The countermeasure is the binding constraint**, as §10 and §12 both
+   concluded for different reasons. Twelve training speakers and LFCC features
+   that are structurally blind to phase-only attacks cannot produce forensic-
+   strength likelihood ratios, and no policy setting changes that.
+3. **Report the gate's operating point alongside any acoustic result.** §22's
+   0.099 is what the acoustic stream achieves *when it is admitted*, and this
+   section is the measurement of how often that is. On this evidence, never.
+4. **The composition test belongs in the suite**, not in a script that has to be
+   remembered. `tests/integration/test_synthetic_acoustic.py` asserts that the
+   gate is reached at all — that a countermeasure verdict derived from a real
+   signal arrives on a real embedding — because the defect above is invisible to
+   every test of either component alone.
+
+### What this does not establish
+
+**One channel condition, one policy, one detector.** The clean 12.2 kbit/s cell
+only. Whether a different bitrate or noise condition moves the score
+distribution above the bar is untested, though the range observed makes it
+implausible.
+
+**The binding is arbitrary and the incidents are simulated**, so nothing here is
+evidence about how often real Zambian fraud recordings would be admitted. What is
+measured is that this detector, on genuine narrowband speech through this
+channel, does not reach this policy's admit threshold.

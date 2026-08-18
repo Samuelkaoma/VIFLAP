@@ -22,7 +22,7 @@ git -C . log --oneline -20
 python -m pytest -q -p no:randomly
 ```
 
-Then read `docs/H1-acoustic-results.md` (~3,350 lines, §§1–23). It is the
+Then read `docs/H1-acoustic-results.md` (~3,630 lines, §§1–24). It is the
 system of record. Every claim in it is either measured or marked withdrawn in
 place; nothing is deleted.
 
@@ -45,7 +45,7 @@ powershell -Command "Get-CimInstance Win32_Process -Filter 'Name=\"python.exe\"'
 
 | | |
 |---|---|
-| Tests | **771, all passing** (~7 min) |
+| Tests | **783, all passing** (~3 min) |
 | ruff | clean (`viflap scripts tests`) |
 | mypy | **63 errors on `viflap`** — pre-existing baseline, not a regression |
 | Git | clean, all pushed, `main` |
@@ -101,6 +101,7 @@ overstatement_ecapa_tcopula.json  §11, same, Student-t
 overstatement_weak_behavioural.json  §11, behavioural at §13's operating point
 overstatement_weak_behavioural_tcopula.json  §11, same, Student-t
 psi_spectrum.json          §23, the ψ₁ candidates and the speaker sweep
+synthetic_acoustic.json    §24, the gate admitting 0 of 80
 afrispeech_survey.json     §8, zero Zambian speakers
 ```
 
@@ -228,6 +229,14 @@ re-deriving. Each is measured, and several are negative results.
   idiolect half. Below the floor the idiolect term is **withheld**, and that
   required a guard: with idiolect pinned at zero the delegation flag fires on
   anything with script evidence, including a transcript compared with itself.
+- **§24** **The validity gate admits nothing.** Reached end to end for the
+  first time by binding synthetic operators to real held-out LibriSpeech
+  speakers: 80 genuine recordings, **0 admitted**, 79 indeterminate, 1 excluded.
+  It is *not* the out-of-domain rule — that and the dispersion check pass by an
+  order of magnitude. The policy wants +2.3 and the detector's range on genuine
+  speech is −2.33 to +1.60, so the bar is never reached. Fail-safe in direction,
+  inoperable in effect: a deployment from these parts runs with its best stream
+  silently absent and correctly reported as absent.
 - **§23** **The ψ₁ spike is corpus structure, by elimination.** It survives a
   complete change of extractor (ECAPA ratio 5.244, inside the i-vector range of
   5.13–7.04), so it is not the i-vector representation. Switching length
@@ -306,12 +315,16 @@ re-deriving. Each is measured, and several are negative results.
 
 ## 5. Open work, in priority order
 
-1. **Put audio on the synthetic pipeline.** `scripts/synthetic_pipeline.py`
-   drives four streams end to end with the real comparators, but not the
-   acoustic one — so `_validity_absence` is never consulted and **the validity
-   gate is still unexercised end to end**. `Operator.acoustic_speaker_id` is the
-   hook: bind operators to real LibriSpeech speakers, embed, register
-   `AcousticStreamComparator`. Heavy, because it needs the corpus and a model.
+1. **Fix the gate/detector mismatch §24 found — but not by moving the
+   threshold.** The gate admits **0 of 80** genuine recordings: the policy wants
+   a countermeasure log-LR of +2.3 and the detector's scores on real speech span
+   −2.33 to +1.60. Both domain checks pass by an order of magnitude, so it is
+   the threshold that decides and the detector simply cannot reach it. Lowering
+   the bar would admit recordings on evidence of ±0.5, which is what the policy
+   exists to refuse. The countermeasure is the binding constraint, as §10 and
+   §12 already concluded for different reasons — twelve training speakers and
+   phase-blind LFCC features cannot produce forensic-strength LRs. Any acoustic
+   result should now be reported alongside how often the gate would admit it.
 
 2. **Corpus expansion — costed this session, and deliberately not started.**
    510 usable speakers came from a fetch stopped at 41%. Completing
