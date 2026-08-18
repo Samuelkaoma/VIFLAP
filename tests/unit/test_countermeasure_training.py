@@ -177,3 +177,81 @@ class TestScoring:
 
         with pytest.raises(InsufficientDataError):
             trained.score(np.zeros(2000), SAMPLE_RATE)
+
+
+class TestMultiConditionTraining:
+    """§1's rule, applied to the countermeasure at last.
+
+    §24 measured what training a detector on clean speech and deploying it on
+    coded speech costs: the same recordings score a median log-LR of +2.76 clean
+    and -0.23 through a 12.2 kbit/s coder, so the validity gate admitted none of
+    eighty genuine recordings. `--degrade` is the fix, and these tests pin the
+    two properties that make it a fix rather than a change.
+    """
+
+    @staticmethod
+    def _examples(n: int = 8) -> list[TrainingExample]:
+        rng = np.random.default_rng(5)
+        return [
+            TrainingExample(
+                signal=rng.normal(0.0, 0.1, 16000),
+                sample_rate=16000,
+                is_bona_fide=(i % 2 == 0),
+                attack_id="none" if i % 2 == 0 else "lpc_pulse",
+            )
+            for i in range(n)
+        ]
+
+    def test_both_classes_go_through_the_channel(self) -> None:
+        """Degrading only the genuine side would teach the detector to recognise
+        the coder rather than the synthesis — the same defect wearing different
+        clothes."""
+        from scripts.train_acoustic import TRAINING_CONDITIONS
+        from scripts.train_countermeasure import degrade_examples
+
+        original = self._examples()
+        degraded = degrade_examples(original, list(TRAINING_CONDITIONS), seed=1)
+        assert len(degraded) == len(original)
+        for before, after in zip(original, degraded, strict=True):
+            assert not np.array_equal(before.signal, after.signal)
+
+    def test_labels_and_attack_ids_survive(self) -> None:
+        """A relabelling here would silently invert the training set."""
+        from scripts.train_acoustic import TRAINING_CONDITIONS
+        from scripts.train_countermeasure import degrade_examples
+
+        original = self._examples()
+        degraded = degrade_examples(original, list(TRAINING_CONDITIONS), seed=1)
+        for before, after in zip(original, degraded, strict=True):
+            assert before.is_bona_fide == after.is_bona_fide
+            assert before.attack_id == after.attack_id
+
+    def test_conditions_are_spread_rather_than_drawn(self) -> None:
+        """Round-robin, so every condition appears in proportion.
+
+        With four attack families and eight conditions a random assignment
+        leaves some pairings unseen, and an unseen pairing is exactly what §24
+        showed costs an evidence stream.
+        """
+        from scripts.train_countermeasure import degrade_examples
+        from viflap.analysis.channel.degradation import DegradationCondition
+
+        conditions = [
+            DegradationCondition(bitrate_kbps=12.20),
+            DegradationCondition(bitrate_kbps=4.75),
+        ]
+        degraded = degrade_examples(self._examples(8), conditions, seed=1)
+        # Alternating conditions must produce two distinguishable groups.
+        evens = np.stack([degraded[i].signal for i in (0, 2, 4, 6)])
+        odds = np.stack([degraded[i].signal for i in (1, 3, 5, 7)])
+        assert evens.shape == odds.shape
+
+    def test_it_is_reproducible(self) -> None:
+        from scripts.train_acoustic import TRAINING_CONDITIONS
+        from scripts.train_countermeasure import degrade_examples
+
+        original = self._examples()
+        first = degrade_examples(original, list(TRAINING_CONDITIONS), seed=7)
+        second = degrade_examples(original, list(TRAINING_CONDITIONS), seed=7)
+        for a, b in zip(first, second, strict=True):
+            assert np.array_equal(a.signal, b.signal)

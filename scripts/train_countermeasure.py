@@ -50,7 +50,9 @@ from numpy.typing import NDArray
 
 from scripts.corpus import materialise, scan_corpora
 from scripts.corpus_zambian import parse_labelled_name
+from scripts.train_acoustic import TRAINING_CONDITIONS
 from viflap.analysis.calibration.metrics import compute_eer
+from viflap.analysis.channel.degradation import DegradationCondition, apply_condition
 from viflap.analysis.spoof.attacks import ATTACKS, apply_attack
 from viflap.analysis.spoof.countermeasure import (
     CountermeasureConfig,
@@ -222,6 +224,51 @@ def evaluate(
     }
 
 
+def degrade_examples(
+    examples: Sequence[TrainingExample],
+    conditions: Sequence[DegradationCondition],
+    seed: int,
+) -> list[TrainingExample]:
+    """Put every example through the channel, genuine and spoofed alike.
+
+    §1 records that the acoustic stack is trained multi-condition, and why:
+    "Training on clean audio and evaluating on degraded audio would have
+    measured a front-end mismatch rather than speaker discriminability." That
+    reasoning was never applied to the countermeasure, and §24 measured what it
+    cost — a detector scoring clean genuine speech at a median log-LR of +2.76
+    scores the same speech through a 12.2 kbit/s coder at -0.23, so the validity
+    gate admitted nothing at all.
+
+    Both classes go through the same channel because both arrive through it in
+    service. Degrading only the genuine side would teach the detector to
+    recognise the codec rather than the synthesis, which is the same defect
+    wearing different clothes.
+
+    Conditions are assigned round-robin rather than at random so every family is
+    represented in proportion regardless of how few examples there are — with
+    four attack families and a handful of conditions, a random assignment leaves
+    some pairings unseen.
+    """
+    degraded: list[TrainingExample] = []
+    for index, example in enumerate(examples):
+        condition = conditions[index % len(conditions)]
+        result = apply_condition(
+            example.signal,
+            example.sample_rate,
+            condition,
+            rng=np.random.default_rng(seed + index),
+        )
+        degraded.append(
+            TrainingExample(
+                signal=result.signal,
+                sample_rate=example.sample_rate,
+                is_bona_fide=example.is_bona_fide,
+                attack_id=example.attack_id,
+            )
+        )
+    return degraded
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -248,6 +295,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     parser.add_argument("--max-train-speakers", type=int, default=300)
+    parser.add_argument(
+        "--degrade",
+        action="store_true",
+        help=(
+            "Train multi-condition, putting every example through the channel "
+            "conditions the acoustic stack trains on. §24 measured what the "
+            "clean-trained detector costs in deployment: the validity gate "
+            "admitted 0 of 80 genuine channel-degraded recordings."
+        ),
+    )
     parser.add_argument(
         "--holdout-audio",
         type=Path,
@@ -301,6 +358,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     started = time.monotonic()
     train_examples = build_examples(train_recordings, attack_ids)
     eval_examples = build_examples(eval_recordings, attack_ids)
+    if arguments.degrade:
+        conditions = list(TRAINING_CONDITIONS)
+        print(
+            f"  degrading through {len(conditions)} channel conditions: "
+            f"{', '.join(c.label for c in conditions)}",
+            flush=True,
+        )
+        train_examples = degrade_examples(train_examples, conditions, arguments.seed)
+        eval_examples = degrade_examples(eval_examples, conditions, arguments.seed + 1)
     print(
         f"  {len(train_examples)} train, {len(eval_examples)} evaluation examples "
         f"in {time.monotonic() - started:.0f}s",
@@ -339,6 +405,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "train_speakers": sorted({r.speaker_id for r in train_recordings}),
         "evaluation_speakers": sorted({r.speaker_id for r in eval_recordings}),
         "attacks": {aid: ATTACKS[aid].description for aid in attack_ids},
+        "multi_condition": bool(arguments.degrade),
         "training_summary": full.training_summary,
         "seen_attacks": seen,
         "unseen_attacks": cross,

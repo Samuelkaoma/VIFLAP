@@ -3565,24 +3565,44 @@ reach it**. The maximum observed over eighty recordings is +1.60 against a bar o
 +2.30; the median is −0.21. One recording fell below −2.30 and was excluded, so
 the only confident verdict the gate issued on genuine audio was a wrong one.
 
-### The mechanism is a mismatch between a policy and a detector
+### The mechanism is a channel mismatch, not a weak detector
 
-`GatePolicy` documents its band as reading directly as a strength of evidence:
-`admit_above = 2.3` means "about ten times more probable under the genuine
-model". That is a defensible thing for a forensic policy to demand. It is not
-something this detector can supply.
+> **The first version of this subsection got the diagnosis wrong**, and wrongly
+> in the direction that would have stopped anyone fixing it. It blamed the
+> detector's discrimination — 16.41% EER on twelve training speakers — and
+> concluded that "asking it for ±2.3 is asking for a discrimination it does not
+> have" and that "no policy setting changes that". That inference was
+> plausible, consistent with §10 and §12, and untested. Testing it refutes it.
 
-§12 benchmarks the countermeasure at **16.41% EER in domain**, roughly twice the
-published GMM baseline, on twelve training speakers and 32 mixture components. A
-detector at that error rate produces log-likelihood ratios concentrated near
-zero: it separates the classes weakly, so it cannot express strong evidence for
-either. Asking it for ±2.3 is asking for a discrimination it does not have. The
-threshold and the detector were specified independently and never met until now.
+Score the *same recordings* before and after the channel:
 
-**Neither component is individually wrong.** The policy is a reasonable forensic
-operating point. The detector is an unremarkable GMM baseline, and §12 records
-that its weakness is understood. What is wrong is the composition, and
-composition is invisible to a unit test of either part.
+| Genuine speech | log-LR min | median | max | Reaching +2.3 |
+|---|---:|---:|---:|---:|
+| **Clean** — as the detector was trained | +0.80 | **+2.76** | +4.93 | **23 of 40** |
+| **12.2 kbit/s** — as it is deployed | −2.33 | **−0.23** | +1.08 | **0 of 40** |
+
+**The detector reaches the threshold comfortably on clean audio and never on
+coded audio.** Its median falls by 2.99 — from confidently genuine to slightly
+spoofed — on identical recordings whose only difference is the coder. The
+discrimination was never the problem.
+
+The cause is that `train_countermeasure.py` trains on clean speech, and §1
+records exactly why the acoustic stack does not:
+
+> Training was multi-condition... Training on clean audio and evaluating on
+> degraded audio would have measured a front-end mismatch rather than speaker
+> discriminability.
+
+That reasoning was applied to the i-vector system in §1 and never to the
+countermeasure. §24 is the measurement of what it cost: an entire evidence
+stream withheld from every comparison, because a detector was asked about audio
+of a kind it had never been shown.
+
+**This is a composition defect twice over.** The policy and the detector were
+specified independently and never met — that part of the original diagnosis
+stands. But the deeper error is that the *training condition* and the
+*deployment condition* were specified independently too, in a project whose
+first section is about why that must not happen.
 
 ### What this means for a deployment
 
@@ -3603,21 +3623,28 @@ acoustic stream.
 
 ### What follows
 
-1. **Do not fix this by lowering the threshold.** A band chosen to match a weak
-   detector's output range would admit recordings on evidence of ±0.5, which is
-   the number the policy exists to refuse. The threshold is not the defect.
-2. **The countermeasure is the binding constraint**, as §10 and §12 both
-   concluded for different reasons. Twelve training speakers and LFCC features
-   that are structurally blind to phase-only attacks cannot produce forensic-
-   strength likelihood ratios, and no policy setting changes that.
+1. **Do not fix this by lowering the threshold.** A band chosen to match a
+   mismatched detector's output range would admit recordings on evidence of
+   ±0.5, which is the number the policy exists to refuse. The threshold is not
+   the defect and moving it would hide one.
+2. **Train the countermeasure multi-condition**, which is the actual fix and is
+   what §1 does for the acoustic stack. `train_countermeasure.py` now takes
+   `--degrade`, putting every example — genuine and spoofed alike — through the
+   same eight channel conditions the i-vector system trains on. Both classes,
+   because degrading only the genuine side would teach the detector to recognise
+   the coder rather than the synthesis. The result is in the next subsection.
 3. **Report the gate's operating point alongside any acoustic result.** §22's
    0.099 is what the acoustic stream achieves *when it is admitted*, and this
-   section is the measurement of how often that is. On this evidence, never.
+   section measures how often that is.
 4. **The composition test belongs in the suite**, not in a script that has to be
    remembered. `tests/integration/test_synthetic_acoustic.py` asserts that the
    gate is reached at all — that a countermeasure verdict derived from a real
    signal arrives on a real embedding — because the defect above is invisible to
    every test of either component alone.
+5. **The phase-only blindness of §10 is untouched by any of this.** LFCCs are
+   magnitude-only whatever they are trained on, and `phase_randomised` remains
+   at chance. Multi-condition training fixes a channel mismatch; it does not
+   give a magnitude feature access to phase.
 
 ### What this does not establish
 
