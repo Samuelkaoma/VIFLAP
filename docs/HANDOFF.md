@@ -45,7 +45,7 @@ powershell -Command "Get-CimInstance Win32_Process -Filter 'Name=\"python.exe\"'
 
 | | |
 |---|---|
-| Tests | **767, all passing** (~7 min) |
+| Tests | **771, all passing** (~7 min) |
 | ruff | clean (`viflap scripts tests`) |
 | mypy | **63 errors on `viflap`** — pre-existing baseline, not a regression |
 | Git | clean, all pushed, `main` |
@@ -98,6 +98,8 @@ overstatement.json         §11, 40 replicates, Gaussian, 42-spk marginal
 overstatement_tcopula.json §11, same, Student-t copula
 overstatement_ecapa.json   §11 on §22's marginal — the strong-marginal arm
 overstatement_ecapa_tcopula.json  §11, same, Student-t
+overstatement_weak_behavioural.json  §11, behavioural at §13's operating point
+overstatement_weak_behavioural_tcopula.json  §11, same, Student-t
 psi_spectrum.json          §23, the ψ₁ candidates and the speaker sweep
 afrispeech_survey.json     §8, zero Zambian speakers
 ```
@@ -265,6 +267,19 @@ re-deriving. Each is measured, and several are negative results.
   dependence modelling is actively harmful — so the defensible fusion for a
   deployment built on §22 is the simplest one available. That inverts the
   section's practical advice and is the reason the re-run was worth doing.
+
+  **`_ASSUMED_STRENGTH` was found not to weaken anything.** Scaling log-LRs is
+  monotonic, so `C_llr_min` is exactly unchanged and all three streams had
+  identical discrimination; the constant reached only the naive sum, and at
+  ρ = 0.6 scaling *down* helped it because under-confidence offsets
+  double-counting. `weaken` is the mechanism that does work — it slides the
+  same-source marginal toward the different-source one — and at the value that
+  reproduces §13's operating point (0.70, giving the behavioural stream
+  `C_llr_min` 0.541 against 0.54) **four of five cells still exclude zero and
+  the fifth does not**. At ρ = 0.8 the interval spans zero under the Gaussian
+  copula and recovers only barely under the t-copula ([+0.005, +0.150]). The
+  claim is now *worse at low and moderate dependence, indistinguishable at
+  ρ = 0.8* — do not restate it as "all five".
 - **§21** Condition stratification works as designed (speakers with a repeated
   condition 75.2% → 0%, per-speaker mean-bitrate SD 1.42 → 0.66 kbit/s) and
   **ψ₁ moved only 44.951 → 43.967**. The condition confound is **refuted** as
@@ -298,27 +313,7 @@ re-deriving. Each is measured, and several are negative results.
    hook: bind operators to real LibriSpeech speakers, embed, register
    `AcousticStreamComparator`. Heavy, because it needs the corpus and a model.
 
-2. **Make §11's behavioural stream genuinely weaker — with a mechanism that
-   works.** Attempting this found that the existing one does not.
-   `_ASSUMED_STRENGTH` scales log-LRs, which is **monotonic**: `C_llr_min` is
-   exactly unchanged at every setting, so all three simulated streams have
-   identical discrimination and only their *confidence* differs. Worse, that
-   reaches one arm only — the two fitted models refit and absorb it, so the
-   constant moves the naive sum alone, and at ρ = 0.6 scaling *down* makes the
-   naive sum **better** because under-confidence offsets double-counting.
-
-   §11 now records which claims survive (the latent-versus-linear comparison
-   does, because both arms are invariant; anything about the naive sum does
-   not). The constants are kept so the published figures stay reproducible.
-
-   What is left needs a different mechanism: draw the behavioural marginal from
-   a distribution with **more overlap**, so the stream is less discriminative
-   rather than the same discrimination expressed less confidently. §13's target
-   is `C_llr` 0.54 at 500 tokens against the acoustic 0.276, or 0.099 under §22.
-   On the evidence above this is the only version of the change that could move
-   the result.
-
-3. **Corpus expansion — costed this session, and deliberately not started.**
+2. **Corpus expansion — costed this session, and deliberately not started.**
    510 usable speakers came from a fetch stopped at 41%. Completing
    `train-clean-360` reaches ~761; `train-other-500` adds ~1,100. Three things
    were checked before deciding:
@@ -348,7 +343,7 @@ re-deriving. Each is measured, and several are negative results.
    the extractor delivered. Worth doing eventually; not worth doing before the
    items above it.
 
-4. ~~**Build an abstention mechanism for the neural extractor.**~~ **Largely
+3. ~~**Build an abstention mechanism for the neural extractor.**~~ **Largely
    done, and it was a repair rather than a build.** The claim behind this item —
    that ECAPA "has no notion" of a recording too short to compare — was wrong.
    The gate existed; it measured wall-clock length under a name that promised

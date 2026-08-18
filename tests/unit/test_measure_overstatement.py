@@ -312,3 +312,90 @@ class TestStreamStrengthIsNotStreamQuality:
         finally:
             mo._ASSUMED_STRENGTH.clear()
             mo._ASSUMED_STRENGTH.update(original)
+
+
+class TestWeakeningAStreamProperly:
+    """``weaken`` has to do what ``_ASSUMED_STRENGTH`` provably does not.
+
+    Scaling log-LRs is monotonic and leaves ``C_llr_min`` exactly where it was.
+    Making a stream genuinely less informative means increasing the *overlap*
+    between its two class distributions, which is what sliding the same-source
+    marginal toward the different-source one does. The distinguishing test is
+    the first one: discrimination must actually move.
+    """
+
+    def test_discrimination_actually_degrades(self, marginal) -> None:
+        """The property scaling could not deliver."""
+        from scripts.measure_overstatement import weaken
+        from viflap.analysis.calibration.metrics import compute_cllr_min
+
+        same, different = marginal
+        labels = np.concatenate(
+            [np.ones(same.size), np.zeros(different.size)]
+        ).astype(np.int64)
+
+        costs = []
+        for factor in (1.0, 0.7, 0.4):
+            weakened = weaken(same, different, factor)
+            costs.append(
+                compute_cllr_min(np.concatenate([weakened, different]), labels)
+            )
+        assert costs[0] < costs[1] < costs[2], costs
+
+    def test_one_leaves_the_marginal_untouched(self, marginal) -> None:
+        """Every §11 figure predating this option was produced at 1.0, so it has
+        to be exactly the identity rather than approximately so."""
+        from scripts.measure_overstatement import weaken
+
+        same, different = marginal
+        assert np.array_equal(weaken(same, different, 1.0), same)
+
+    def test_zero_puts_the_class_means_together(self, marginal) -> None:
+        """A stream carrying no information at all is the far end of the range."""
+        from scripts.measure_overstatement import weaken
+
+        same, different = marginal
+        collapsed = weaken(same, different, 0.0)
+        assert float(np.mean(collapsed)) == pytest.approx(
+            float(np.mean(different)), abs=1e-9
+        )
+
+    def test_the_spread_is_left_alone(self, marginal) -> None:
+        """Only the gap between the classes moves.
+
+        Shrinking the spread as well would change the distribution's shape and
+        the comparison across streams would stop being like-for-like — the
+        property the quantile mapping exists to preserve.
+        """
+        from scripts.measure_overstatement import weaken
+
+        same, different = marginal
+        assert float(np.std(weaken(same, different, 0.5))) == pytest.approx(
+            float(np.std(same))
+        )
+
+    def test_it_reaches_only_the_stream_it_is_asked_for(self, marginal) -> None:
+        """Per-stream, so one stream can be weak while another stays measured."""
+        from scripts.measure_overstatement import simulate
+        from viflap.domain.evidence import EvidenceStream
+
+        same, different = marginal
+        training = simulate(
+            same,
+            different,
+            0.0,
+            3000,
+            np.random.default_rng(9),
+            discriminability={EvidenceStream.BEHAVIOURAL: 0.3},
+        )
+        rows = np.array(
+            [
+                [o.log_lrs[s] for s in _STREAMS]
+                for o in training.observations
+                if o.is_same_source
+            ]
+        )
+        acoustic, behavioural = rows[:, 0].mean(), rows[:, 1].mean()
+        # The behavioural column was slid toward the different-source mean; the
+        # acoustic one was not, so their same-source means must now differ.
+        assert behavioural < acoustic

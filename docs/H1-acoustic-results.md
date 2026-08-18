@@ -1557,6 +1557,78 @@ quantile-mapped separation — drawing that stream's marginal from a distributio
 with more overlap — would do it. Nothing here measures what that does, and on the
 evidence above it is the only version of the change that could move the result.
 
+### A behavioural stream that is genuinely weaker, and the one cell it changes
+
+The subsection above establishes that `_ASSUMED_STRENGTH` cannot make a stream
+less informative. `weaken` can: it slides the same-source marginal toward the
+different-source one by a fraction of the gap between their means, leaving both
+spreads alone, so the two class distributions genuinely overlap more and the ROC
+moves. Artefacts: `overstatement_weak_behavioural.json` and
+`..._tcopula.json`.
+
+**The setting is derived, not chosen.** §13's forensic operating point puts
+authorship at `C_llr` 0.54 for 500-token transcripts, and Ishihara reports those
+LRs as well calibrated, so `C_llr ≈ C_llr_min` and 0.54 can be read as
+discrimination. Sweeping the parameter against the measured marginal:
+
+| Discriminability | Behavioural stream's own `C_llr_min` |
+|---:|---:|
+| 1.00 (equal to acoustic) | 0.357 |
+| 0.80 | 0.479 |
+| **0.70** | **0.541** |
+| 0.60 | 0.596 |
+
+0.70 lands on §13's figure to three decimals, so that is the value used. The
+behavioural stream is now materially worse than the acoustic one — 0.541 against
+0.357 — which is what §13 said it should be and what the section had never
+actually implemented.
+
+| ρ | naive sum | **linear-logistic** | Gaussian latent | Latent − linear [95% CI] |
+|---:|---:|---:|---:|---|
+| 0.0 | 0.262 | **0.115** | 0.140 | +0.025 [+0.002, +0.066] |
+| 0.2 | 0.358 | **0.190** | 0.236 | +0.046 [+0.012, +0.091] |
+| 0.4 | 0.461 | **0.254** | 0.320 | +0.065 [+0.018, +0.113] |
+| 0.6 | 0.575 | **0.306** | 0.386 | +0.080 [+0.017, +0.145] |
+| 0.8 | 0.697 | **0.346** | 0.419 | **+0.073 [−0.013, +0.143]** |
+
+**Four of five still exclude zero. The fifth does not, and it is the first cell
+in this section's history where the dependence model is not significantly
+worse.** At ρ = 0.8 with a properly weak behavioural stream the interval spans
+zero, so at the highest correlation tested the two models become
+indistinguishable on this evidence.
+
+Under the t-copula the same cell recovers, barely — +0.073 [+0.005, +0.150], an
+interval whose lower bound is 0.005 — and the other four are unchanged in
+direction. So the ρ = 0.8 result is not robust in either direction: it excludes
+zero under misspecification and includes it under correct specification, which
+is a statement about how little separates the two models there rather than about
+which is better.
+
+### What this does and does not change
+
+**The section's conclusion holds where it was ever load-bearing.** The dependence
+model is significantly worse across ρ = 0 to 0.6 under both copulas and under
+every marginal tried — the 42-speaker one, §22's ECAPA one, and now a properly
+weakened behavioural stream. That is a robustness range the section did not have
+before.
+
+**But the claim can no longer be stated for every ρ without qualification.** The
+earlier tables read "all five exclude zero" and that was true of the marginals
+then in use; it is not true once the behavioural stream is given the strength §13
+says it has. The honest form is: *worse at low and moderate dependence,
+indistinguishable at ρ = 0.8*.
+
+**Everything gets worse, which is the unsurprising part.** A weaker stream means
+less information, and all three arms degrade — the naive sum from 0.158 to 0.262
+at ρ = 0, the calibrated model from 0.082 to 0.115. Nothing about the ordering
+follows from that; it is reported so the columns are not read as comparable to
+the tables above.
+
+**The temporal stream is still at 1.0.** Only the behavioural one was weakened,
+because it is the only one §13 gives an operating point for. The temporal and
+device streams have no published figure to calibrate against and are left equal
+to acoustic, which is still optimistic and still stated rather than hidden.
+
 ### What this still does not establish (original)
 
 > **Two items previously listed here have been addressed** and are struck rather

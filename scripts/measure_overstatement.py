@@ -52,7 +52,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -208,6 +208,31 @@ def _fused_cllr(model: object, evaluation: FusionTrainingSet) -> float:
     return float(compute_cllr(np.asarray(fused), np.asarray(labels, dtype=np.int64)))
 
 
+def weaken(
+    same_source: NDArray[np.float64],
+    different_source: NDArray[np.float64],
+    discriminability: float,
+) -> NDArray[np.float64]:
+    """Make a stream genuinely less discriminative, not merely less confident.
+
+    ``_ASSUMED_STRENGTH`` scales log-LRs, which is monotonic and therefore leaves
+    ``C_llr_min`` exactly unchanged — §11 records that finding and the fact that
+    the constant reaches only the naive sum. Reducing *discrimination* needs the
+    two class distributions to overlap more, so this slides the same-source
+    marginal toward the different-source one by a fraction of the gap between
+    their means, leaving both spreads alone.
+
+    ``discriminability = 1`` is the measured marginal untouched; ``0`` puts the
+    two means on top of each other, which is a stream carrying no information.
+    Nothing here is calibrated afterwards, so what comes out is a stream whose
+    ROC has genuinely moved.
+    """
+    if discriminability >= 1.0:
+        return same_source
+    gap = float(np.mean(same_source) - np.mean(different_source))
+    return same_source - (1.0 - discriminability) * gap
+
+
 def simulate(
     same_source: NDArray[np.float64],
     different_source: NDArray[np.float64],
@@ -216,6 +241,7 @@ def simulate(
     rng: np.random.Generator,
     copula: str = "gaussian",
     degrees_of_freedom: float = 4.0,
+    discriminability: Mapping[EvidenceStream, float] | None = None,
 ) -> FusionTrainingSet:
     """Generate comparisons whose streams share an operation-level cause.
 
@@ -259,7 +285,13 @@ def simulate(
     values = np.empty_like(positions)
     for index in range(len(_STREAMS)):
         column = positions[:, index]
-        values[truth, index] = _from_positions(column[truth], same_source)
+        # Each stream may carry its own same-source marginal, which is what makes
+        # one stream genuinely weaker than another rather than merely quieter.
+        stream_same = same_source
+        if discriminability is not None:
+            factor = discriminability.get(_STREAMS[index], 1.0)
+            stream_same = weaken(same_source, different_source, factor)
+        values[truth, index] = _from_positions(column[truth], stream_same)
         values[~truth, index] = _from_positions(column[~truth], different_source)
         # Scales the stream's confidence, NOT its discrimination — this is a
         # monotonic map and leaves C_llr_min exactly unchanged. See
@@ -309,6 +341,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     parser.add_argument("--copula", choices=("gaussian", "t"), default="gaussian")
+    parser.add_argument(
+        "--behavioural-discriminability",
+        type=float,
+        default=1.0,
+        help=(
+            "Slide the behavioural stream's same-source marginal toward the "
+            "different-source one by (1 - this) of the gap, making it genuinely "
+            "less discriminative. 1.0 leaves it equal to the acoustic stream, "
+            "which is what every figure in §11 before this option was produced "
+            "with. See `weaken` on why scaling log-LRs does not do this."
+        ),
+    )
     parser.add_argument("--degrees-of-freedom", type=float, default=4.0)
     parser.add_argument(
         "--no-resample-marginal",
@@ -344,6 +388,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         flush=True,
     )
 
+    discriminability = {
+        EvidenceStream.BEHAVIOURAL: arguments.behavioural_discriminability
+    }
     results: list[dict[str, object]] = []
     for correlation in arguments.correlations:
         per_replicate: dict[str, list[float]] = {
@@ -373,6 +420,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 np.random.default_rng(base),
                 copula=arguments.copula,
                 degrees_of_freedom=arguments.degrees_of_freedom,
+                discriminability=discriminability,
             )
             evaluation = simulate(
                 marginal_same,
@@ -382,6 +430,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 np.random.default_rng(base + 1),
                 copula=arguments.copula,
                 degrees_of_freedom=arguments.degrees_of_freedom,
+                discriminability=discriminability,
             )
             _accumulate(training, evaluation, per_replicate, exaggerations, band_rates)
 
