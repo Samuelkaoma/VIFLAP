@@ -366,6 +366,20 @@ class Trial:
     resampling unit, which is what the speaker bootstrap requires."""
 
 
+def _pair_key(first_id: str, second_id: str) -> tuple[str, str]:
+    """The identity of a trial: its two recordings, order removed.
+
+    Sorted for the same reason ``_different_source_owner`` hashes an unordered
+    pair — which recording is "first" is an artefact of enumeration order, and
+    two systems that both iterate ``i < j`` over differently ordered inputs would
+    otherwise produce keys that never match. This is the join key that lets a
+    paired comparison be built between two scripts' outputs, so if it depended on
+    ordering the pairing would fail silently, aligning unrelated trials rather
+    than raising.
+    """
+    return (first_id, second_id) if first_id <= second_id else (second_id, first_id)
+
+
 def _different_source_owner(first: str, second: str, first_id: str, second_id: str) -> str:
     """Which of two speakers a different-source trial is attributed to.
 
@@ -412,6 +426,22 @@ class TrialSet:
     scores: NDArray[np.float64]
     labels: NDArray[np.int64]
     speakers: tuple[str, ...]
+
+    pairs: tuple[tuple[str, str], ...] = ()
+    """The two recording identifiers behind each trial, in sorted order.
+
+    Carried so that two systems scoring the same corpus can be **joined trial
+    for trial** rather than compared through their separate intervals.
+    ``paired_bootstrap_over_speakers`` requires vectors aligned trial for trial
+    and says so, but nothing until now recorded what a trial *was* — the row
+    index depends on the order recordings came off the scan, and two scripts
+    that both iterate ``i < j`` still produce different orderings if either
+    system refused a different subset. Sorted, so the key does not depend on
+    which recording happened to be enumerated first.
+
+    Defaulted to empty because ``compare_capacity`` and ``compare_cmvn`` build
+    their own trial sets and do not need it.
+    """
 
     @property
     def n_same_source(self) -> int:
@@ -474,6 +504,7 @@ def build_trials(
     scores: list[float] = []
     labels: list[int] = []
     speakers: list[str] = []
+    pairs: list[tuple[str, str]] = []
 
     for index, probe in enumerate(metadata):
         if index + 1 >= len(metadata):
@@ -492,6 +523,7 @@ def build_trials(
                 scores.append(float(row[offset]))
                 labels.append(1)
                 speakers.append(probe.speaker_id)
+                pairs.append(_pair_key(probe.recording_id, candidate.recording_id))
             else:
                 different_indices.append(offset)
 
@@ -518,11 +550,13 @@ def build_trials(
                     candidate.recording_id,
                 )
             )
+            pairs.append(_pair_key(probe.recording_id, candidate.recording_id))
 
     return TrialSet(
         scores=np.array(scores, dtype=np.float64),
         labels=np.array(labels, dtype=np.int64),
         speakers=tuple(speakers),
+        pairs=tuple(pairs),
     )
 
 

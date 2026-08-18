@@ -187,12 +187,21 @@ def evaluate_cell(
     n_resamples: int,
     workers: int | None,
     hypothesis: H1ChannelViability,
+    scores_sink: dict[str, TrialSet] | None = None,
 ) -> tuple[CellResult, TrialSet | None]:
     """Embed, score, calibrate and summarise one cell.
 
     Returns the cell result and the development trial set, the latter so that
     the reference condition's trials can be reused to fit the transferred
     calibrator.
+
+    ``scores_sink``, when supplied, receives this cell's **evaluation** trials
+    keyed by ``{condition}@{duration:g}``. It is a sink rather than a third
+    return value because the return tuple already means something else and a
+    third element would be silently ignored by both existing callers. Persisting
+    these is what makes a paired comparison against another system possible at
+    all: this script's expensive half is degrading and embedding the corpus, and
+    without the scores on disk any pairing costs a full rerun.
     """
     notes: list[str] = []
     truncated_dev = [r.truncated(duration) for r in development]
@@ -269,6 +278,9 @@ def evaluate_cell(
             [r.speaker_id for r, _ in dev_embedded],
             [r.speaker_id for r, _ in eval_embedded],
         )
+
+        if scores_sink is not None:
+            scores_sink[f"{condition.label}@{duration:g}"] = eval_trials
 
         # Discrimination and the H1 decision, both on the raw scores. C_llr_min
         # is invariant to monotonic recalibration, so calibrating first would
@@ -367,6 +379,7 @@ def run_sweep(
     workers: int | None,
     seed: int,
     checkpoint: Callable[[list[CellResult]], None] | None = None,
+    scores_sink: dict[str, TrialSet] | None = None,
 ) -> list[CellResult]:
     """Degrade once per condition, then evaluate every duration through it.
 
@@ -410,6 +423,7 @@ def run_sweep(
                 n_resamples=n_resamples,
                 workers=workers,
                 hypothesis=hypothesis,
+                scores_sink=scores_sink,
             )
             results.append(cell)
 
@@ -519,6 +533,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--max-speakers", type=int, default=None)
     parser.add_argument("--max-eval-recordings", type=int, default=None)
     parser.add_argument("--resamples", type=int, default=1000)
+    parser.add_argument(
+        "--scores",
+        type=Path,
+        default=None,
+        help=(
+            "Persist per-trial evaluation scores, labels, owners and "
+            "recording-id pairs to this .npz. The expensive half of this script "
+            "is degrading and embedding the corpus; without the scores on disk, "
+            "pairing this system against another costs a full rerun."
+        ),
+    )
     parser.add_argument("--workers", type=int, default=None)
     parser.add_argument("--seed", type=int, default=20250601)
     arguments = parser.parse_args(argv)
@@ -618,6 +643,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         }
         arguments.output.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
+    scores_sink: dict[str, TrialSet] | None = {} if arguments.scores else None
     results = run_sweep(
         development,
         evaluation,
@@ -629,10 +655,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         workers=arguments.workers,
         seed=arguments.seed,
         checkpoint=lambda partial: write(partial, complete=False),
+        scores_sink=scores_sink,
     )
     elapsed = time.monotonic() - started
     write(results, complete=True)
     print(f"\nwrote {arguments.output} after {elapsed / 60:.1f} min", flush=True)
+
+    if arguments.scores is not None and scores_sink is not None:
+        persisted: dict[str, NDArray[np.generic]] = {}
+        for cell, trials in scores_sink.items():
+            persisted[f"{cell}|scores"] = trials.scores
+            persisted[f"{cell}|labels"] = trials.labels
+            persisted[f"{cell}|owners"] = np.array(trials.speakers, dtype=np.str_)
+            persisted[f"{cell}|pairs"] = np.array(
+                ["\t".join(pair) for pair in trials.pairs], dtype=np.str_
+            )
+        arguments.scores.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(arguments.scores, **persisted)
+        print(f"wrote {arguments.scores} ({len(scores_sink)} cells)", flush=True)
+
     print(
         json.dumps(overall_verdict(results, H1ChannelViability()), indent=2),
         flush=True,

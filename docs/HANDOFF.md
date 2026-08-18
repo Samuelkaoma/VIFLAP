@@ -109,13 +109,56 @@ the like-for-like i-vector column.
 
 ## 3. Running now
 
-**Nothing.** `extract_neural` completed (330 min, 13 cells, 0 refusals) and
-`score_neural` completed twice — once at the native 192 dimensions and once at
-`--lda-dimension 100` as a control. §22 is written and its numbers were read
-back off `h1_neural.json` rather than off the terminal.
+**`python -m scripts.compare_extractors --resamples 2000`** — the paired
+difference between the i-vector and ECAPA systems, which is what §22 currently
+lacks. Writes `data/reports/h1_extractor_paired.json`.
+
+If it is no longer running, check whether that artefact exists. If it does, the
+result needs writing into §22 (see below). If it does not, just rerun it — both
+input archives are on disk and the script is the only cheap part:
+
+```bash
+python -m scripts.compare_extractors --resamples 2000
+```
+
+**Both inputs are already generated and verified, and they are the expensive
+part — do not regenerate them.**
+
+```
+h1_pooled_scores.npz   i-vector per-trial scores, from evaluate_h1 --scores  (~43 min)
+h1_neural_scores.npz   ECAPA per-trial scores, from score_neural --scores    (~16 min)
+```
+
+The `evaluate_h1` rerun that produced the first of those doubles as a control:
+all six point estimates reproduce `h1_pooled_ownership.json` to five decimal
+places, so adding score persistence changed nothing the script computes. Its
+intervals differ in the third decimal (bootstrap noise between runs), so **§22
+keeps quoting `h1_pooled_ownership.json`**, not `h1_pooled_rescored.json`.
+
+### What to do with the paired result
+
+`h1_extractor_paired.json` carries, per cell, the difference
+`variant − baseline` on `C_llr_min` with a BCa interval and a p-value, plus a
+Holm decision over the family. **Negative means ECAPA is better.** Write it into
+§22's "What this does not establish", which currently opens by saying the
+comparison is not paired and the direction is not established at a stated
+confidence — that paragraph is what the result replaces.
+
+Two things must survive into the write-up whatever the numbers say:
+
+- **Only the four 30 s and 15 s cells are paired on identical trial sets.** The
+  5 s cells are paired on the *intersection*, which is the subset the i-vector
+  front-end was willing to embed — an easier subset, per §6 — and the artefact
+  records `trial_sets_identical` per cell so this is checkable rather than
+  remembered.
+- **A null is a real possible outcome and must be reported as one.** §22 is
+  written expecting confirmation. If the paired test does not establish the
+  direction, the existing sentence stands and gains a measurement behind it.
 
 Timings for planning: `extract_neural` 330 min end to end at ~6 s per recording
-per three durations; `score_neural --resamples 2000` 16 min.
+per three durations; `score_neural --resamples 2000` 16 min; `evaluate_h1` over
+6 cells ~43 min; `compare_extractors` at B = 2000 is **slow** — each resample
+runs a PAV over 133,645 trials for both systems, plus a 102-fold jackknife.
 
 ---
 

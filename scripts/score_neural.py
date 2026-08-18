@@ -40,7 +40,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
-from scripts.experiment import _different_source_owner
+from scripts.experiment import _different_source_owner, _pair_key
 from viflap.analysis.calibration.calibrators import LogisticCalibrator, as_reported
 from viflap.analysis.calibration.metrics import compute_cllr, compute_eer
 from viflap.analysis.speaker.plda import PldaConfig, PldaModel, train_plda
@@ -59,6 +59,12 @@ class TrialSet:
     scores: NDArray[np.float64]
     labels: NDArray[np.int64]
     speakers: list[str]
+
+    pairs: tuple[tuple[str, str], ...] = ()
+    """The two recording identifiers behind each trial, sorted. Same purpose and
+    same key function as ``experiment.TrialSet.pairs`` — it is what lets §22's
+    comparison be joined trial for trial against the i-vector system rather than
+    compared through two marginal intervals."""
 
     @property
     def n_same_source(self) -> int:
@@ -101,6 +107,7 @@ def build_trials(
     scores: list[float] = []
     labels: list[int] = []
     owners: list[str] = []
+    pairs: list[tuple[str, str]] = []
 
     for i in range(len(speakers)):
         for j in range(i + 1, len(speakers)):
@@ -118,10 +125,13 @@ def build_trials(
                     speakers[i], speakers[j], recording_ids[i], recording_ids[j]
                 )
             )
+            pairs.append(_pair_key(recording_ids[i], recording_ids[j]))
 
     if not scores:
         raise InsufficientDataError("no admissible trials were formed")
-    return TrialSet(np.array(scores), np.array(labels, dtype=np.int64), owners)
+    return TrialSet(
+        np.array(scores), np.array(labels, dtype=np.int64), owners, tuple(pairs)
+    )
 
 
 @dataclass(slots=True)
@@ -157,6 +167,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=Path("data/reports/neural_extraction.json"),
     )
     parser.add_argument("--output", type=Path, default=Path("data/reports/h1_neural.json"))
+    parser.add_argument(
+        "--scores",
+        type=Path,
+        default=None,
+        help=(
+            "Persist per-trial scores, labels, owners and recording-id pairs to "
+            "this .npz. Without it the only way to pair this system against "
+            "another is to rescore both, which for the i-vector side means "
+            "re-degrading and re-embedding the corpus."
+        ),
+    )
     parser.add_argument("--lda-dimension", type=int, default=None)
     parser.add_argument("--resamples", type=int, default=2000)
     arguments = parser.parse_args(argv)
@@ -189,6 +210,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     hypothesis = H1ChannelViability()
     cells: list[CellResult] = []
+    persisted: dict[str, NDArray[np.generic]] = {}
     extraction = (
         json.loads(arguments.extraction_report.read_text(encoding="utf-8"))
         if arguments.extraction_report.exists()
@@ -231,6 +253,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             n_resamples=arguments.resamples,
         )
         estimate = outcome.estimate
+
+        if arguments.scores is not None:
+            persisted[f"{cell}|scores"] = evaluation.scores
+            persisted[f"{cell}|labels"] = evaluation.labels
+            persisted[f"{cell}|owners"] = np.array(evaluation.speakers, dtype=np.str_)
+            # Stored as one string per trial rather than a 2-D array, so the
+            # join key survives a round trip through ``np.savez`` without the
+            # caller having to know it was ever a tuple.
+            persisted[f"{cell}|pairs"] = np.array(
+                ["\t".join(pair) for pair in evaluation.pairs], dtype=np.str_
+            )
 
         c_llr_matched = c_llr_unbounded = calibration_loss = None
         development_key = f"development|{cell}"
@@ -306,6 +339,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         encoding="utf-8",
     )
     print(f"\nwrote {arguments.output}", flush=True)
+    if arguments.scores is not None:
+        arguments.scores.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(arguments.scores, **persisted)
+        print(f"wrote {arguments.scores}", flush=True)
     return 0
 
 
