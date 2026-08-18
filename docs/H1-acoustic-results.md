@@ -3029,3 +3029,129 @@ too few speakers, and borrowing the extractor is precisely what removes it.
 4. **The countermeasure is untouched by this.** §10's blindness to phase-only
    attacks is a property of LFCC features, and a better speaker embedding does
    nothing for a validity gate that cannot see the attack.
+
+---
+
+## 23. What produces the ψ₁ spike: two candidates refuted, one left standing
+
+§1 recorded that the leading PLDA eigenvalue runs five to seven times the second
+across every model this project has trained, and said plainly why that matters:
+one dominant axis of between-speaker variation is what a nuisance factor absorbed
+into the speaker subspace looks like, because a factor shared across a speaker's
+recordings is indistinguishable from the speaker as far as PLDA is concerned. §21
+refuted the most promising explanation — condition stratification moved ψ₁ only
+44.951 → 43.967 — and left three candidates: **LibriSpeech session or environment
+effects**, **length normalisation**, and **upward bias in a leading eigenvalue
+estimated from a few hundred speakers**.
+
+§22 supplies an instrument the earlier sections did not have. Artefact:
+`data/reports/psi_spectrum.json`.
+
+### The spike survives a complete change of extractor
+
+ECAPA embeddings share the corpus, the channel, the split and the back-end with
+the i-vector system, and share nothing of its front-end: no MFCCs, no GMM-UBM, no
+total-variability subspace.
+
+| Model | Transform dim. | ψ₁ | **ψ₁/ψ₂** |
+|---|---:|---:|---:|
+| `acoustic` (125 spk) | 100 | 50.761 | **5.127** |
+| `acoustic_large` | 124 | 86.034 | **5.872** |
+| `acoustic_pooled` (306 spk) | 100 | 44.951 | **7.041** |
+| `acoustic_pooled_cmvn_utt` | 100 | 46.701 | **6.873** |
+| `acoustic_pooled_cmvn100` | 100 | 41.951 | **6.584** |
+| **ECAPA + same back-end** | 192 | 66.983 | **5.244** |
+
+The borrowed extractor lands at 5.244, inside the i-vector range and close to
+§1's 5.127. **Whatever produces the spike is not a property of the i-vector
+representation.** That was never one of the three candidates, but it was the
+obvious fourth, and it is now excluded.
+
+What this does *not* clear is the back-end: length normalisation, LDA, WCCN and
+the PLDA implementation are shared between the two systems, so a ratio that
+survives is consistent with any of them. Hence the next arm.
+
+### Length normalisation is refuted
+
+The one shared component cheap enough to switch off.
+
+| | ψ₁ | ψ₁/ψ₂ |
+|---|---:|---:|
+| ECAPA, length-normalised | 66.983 | **5.244** |
+| ECAPA, **not** length-normalised | 74.973 | **5.308** |
+
+The ratio moves by **0.064**, against a spread of 1.9 across the models in the
+table above. Length normalisation is not what produces the spike, and the
+candidate is withdrawn.
+
+### Estimation bias is refuted, and the obvious reading of it is backwards
+
+If the spike were upward bias in a leading eigenvalue estimated from few
+speakers, then *fewer speakers should give a larger ratio*. §21 noted that the
+125-speaker model shows a smaller one and called that the wrong direction, but
+that was a comparison between two models differing in more than speaker count.
+This is the controlled sweep: same embeddings, same back-end, transform dimension
+pinned at 74 so the LDA ceiling does not move with the sample, five random draws
+per count.
+
+| Training speakers | ψ₁/ψ₂ [min, max over draws] | ψ₁ |
+|---:|---|---:|
+| 75 | **3.160** [2.904, 3.501] | 181.077 |
+| 150 | **4.307** [4.021, 4.461] | 81.566 |
+| 225 | **4.923** [4.472, 5.477] | 67.998 |
+| 306 | **4.956** | 61.032 |
+
+**The ratio rises with speaker count and the ranges at 75 and 150 do not
+overlap.** That is the opposite of the estimation-bias prediction, so the
+candidate is withdrawn.
+
+The sweep also shows why the intuition behind it was reasonable, and where it
+went wrong. **ψ₁ itself is very clearly upward-biased at small samples** — 181.1
+at 75 speakers against 61.0 at 306, a factor of three. The bias is real. But the
+quantity §1 tracks is the *ratio*, and ψ₂ is biased upward faster than ψ₁ is, so
+the ratio moves the other way. A section reporting only ψ₁ would have concluded
+the opposite of the truth, which is an argument for §1 having tracked the ratio
+rather than the leading value.
+
+### What is left
+
+**LibriSpeech session and environment effects — the only candidate still
+standing**, and the one consistent with every measurement above. It is a property
+of the *corpus*, which both systems share, so it survives a change of extractor;
+it is not a property of the back-end, so it survives switching length
+normalisation off; and it does not shrink with more speakers, because adding
+LibriVox readers adds more readers with the same structure rather than diluting
+it.
+
+The mechanism is concrete. LibriVox readers record themselves, each in one room
+with one microphone. A recording's channel is therefore near-constant within a
+reader and varies between readers — which is exactly the shape §1 describes as
+indistinguishable from the speaker. Our same-source trials cross *chapters*, so
+they cross recording days, but for a home-recorded reader they very often do not
+cross a recording setup.
+
+**This bears on §9 and §22 rather than only on §1.** If a per-reader channel is
+being absorbed into the speaker subspace, then both systems are being helped by
+something that will not be present in casework, where one person is heard through
+different handsets, networks and rooms. It does not touch the *relative* findings
+— §22's paired difference holds both systems to the same corpus and the same
+confound — but it is a reason to expect the absolute figures, including §22's
+four supported cells, to be optimistic against real telephony data.
+
+Establishing that requires a corpus in which speaker and channel are crossed
+rather than confounded. §8 records what is available for the target population,
+and this is one more argument for the same missing resource.
+
+### What this does not establish
+
+**"Session effects" is now a residual, not a measurement.** It is what remains
+after two candidates were refuted, and a residual is only as good as the list it
+was drawn from. A fourth explanation nobody has thought of would sit exactly
+where this one does.
+
+**The two refutations are of the *ratio*, not of every claim about ψ₁.** ψ₁ is
+demonstrably upward-biased at small speaker counts, and any future statement
+about its absolute value has to carry that.
+
+**No corpus-crossed control was run**, because none is available here. The
+mechanism above is argued from how LibriVox is recorded, not measured.

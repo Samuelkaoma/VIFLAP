@@ -22,7 +22,7 @@ git -C . log --oneline -20
 python -m pytest -q -p no:randomly
 ```
 
-Then read `docs/H1-acoustic-results.md` (~2,900 lines, §§1–22). It is the
+Then read `docs/H1-acoustic-results.md` (~3,100 lines, §§1–23). It is the
 system of record. Every claim in it is either measured or marked withdrawn in
 place; nothing is deleted.
 
@@ -45,7 +45,7 @@ powershell -Command "Get-CimInstance Win32_Process -Filter 'Name=\"python.exe\"'
 
 | | |
 |---|---|
-| Tests | **728, all passing** |
+| Tests | **750, all passing** |
 | ruff | clean (`viflap scripts tests`) |
 | mypy | **63 errors on `viflap`** — pre-existing baseline, not a regression |
 | Git | clean, all pushed, `main` |
@@ -76,7 +76,6 @@ acoustic_pooled_cmvn_utt.npz    CMVN 0                          §17 control
 acoustic_pooled_cmvn100.npz     CMVN 100                        §17 control
 acoustic_pooled_global.npz      306 spk, global allocation      §21 control
 acoustic_pooled_stratified.npz  306 spk, stratified allocation  §21
-pretrained/spkrec-ecapa-voxceleb/   ECAPA-TDNN, 89 MB, 192-dim
 countermeasure_english.npz      300 English spk                 §10
 pretrained/spkrec-ecapa-voxceleb/   ECAPA-TDNN, 89 MB, 192-dim  §22
 ```
@@ -89,8 +88,10 @@ neural_extraction.json    13 cells, 0 refusals anywhere         §22
 h1_neural.json            the §22 result table
 h1_neural_lda100.json     the §22 dimension control
 h1_pooled_ownership.json  the i-vector baseline §22 compares to
+h1_extractor_paired.json  §22's paired difference, 6/6 surviving Holm
 overstatement.json        §11, 40 replicates, Gaussian copula
 overstatement_tcopula.json §11, 40 replicates, Student-t copula
+psi_spectrum.json         §23, the ψ₁ candidates and the speaker sweep
 ```
 
 **Current best is now the borrowed ECAPA extractor with the same 306-speaker
@@ -188,6 +189,18 @@ re-deriving. Each is measured, and several are negative results.
   idiolect half. Below the floor the idiolect term is **withheld**, and that
   required a guard: with idiolect pinned at zero the delegation flag fires on
   anything with script evidence, including a transcript compared with itself.
+- **§23** **The ψ₁ spike is corpus structure, by elimination.** It survives a
+  complete change of extractor (ECAPA ratio 5.244, inside the i-vector range of
+  5.13–7.04), so it is not the i-vector representation. Switching length
+  normalisation off moves it 0.064 against a 1.9 spread across models, so that
+  candidate is **refuted**. And the ratio *rises* with training speakers —
+  3.160 at 75, 4.956 at 306, non-overlapping between 75 and 150 — which is the
+  opposite of the estimation-bias prediction, so that one is **refuted** too.
+  Note ψ₁ *itself* is strongly upward-biased at small samples (181 at 75 against
+  61 at 306); it is ψ₂ that falls faster, which is why the ratio moves the other
+  way and why tracking ψ₁ alone would have given the opposite conclusion.
+  LibriVox per-reader recording environment is the only survivor, and it implies
+  §9's and §22's absolute figures are optimistic against real telephony.
 - **§11** Now 40 replicates per level with the acoustic marginal resampled over
   speakers, plus a Student-t copula arm for misspecification. Two findings. The
   marginal intervals are **enormous** — the naive sum spans [0.032, 0.316] at
@@ -225,22 +238,14 @@ re-deriving. Each is measured, and several are negative results.
 
 ## 5. Open work, in priority order
 
-1. **Rerun §21's ψ₁ question on the ECAPA embeddings.** They are on disk, so
-   this costs minutes and is now the cheapest open question in the project. The
-   extractor changed and the corpus did not: if the spike is a LibriSpeech
-   session effect it should survive; if it is an i-vector length-normalisation
-   artefact it should not. §22 reports ψ₁ = 66.98 but not the ψ₁/ψ₂ *ratio*,
-   which is the comparable quantity — §1's is 5.13 and the range across the five
-   i-vector models is 5.1 to 7.0.
-
-2. **Place the system on `forensic_eval_01`.** §12's benchmark is an inference
+1. **Place the system on `forensic_eval_01`.** §12's benchmark is an inference
    across datasets until this is run, and §22 makes it worth measuring properly:
    the matched `C_llr` of 0.138 now sits in the range of E3FS3's case-specific
    conditions, which is exactly the best-cell-against-best-condition comparison
    §12 was rewritten to stop making. The like-for-like figure is 0.208 on a
    benchmark this system has never been run on.
 
-3. **Re-run §11 against a marginal that is not superseded.** The intervals and
+2. **Re-run §11 against a marginal that is not superseded.** The intervals and
    the t-copula arm are done; what remains is that `calibration_scores.npz` is
    the **42-speaker** §4/§5 baseline evaluation, so the acoustic stream feeding
    the simulation is far weaker than §9's pooled model and much weaker than
@@ -250,20 +255,20 @@ re-deriving. Each is measured, and several are negative results.
    `C_llr` 0.54 at 500 tokens, *worse* than acoustic rather than 75% of it. Both
    assumptions should move in the same pass.
 
-4. **Put audio on the synthetic pipeline.** `scripts/synthetic_pipeline.py`
+3. **Put audio on the synthetic pipeline.** `scripts/synthetic_pipeline.py`
    drives four streams end to end with the real comparators, but not the
    acoustic one — so `_validity_absence` is never consulted and **the validity
    gate is still unexercised end to end**. `Operator.acoustic_speaker_id` is the
    hook: bind operators to real LibriSpeech speakers, embed, register
    `AcousticStreamComparator`. Heavy, because it needs the corpus and a model.
 
-5. **Corpus expansion.** 510 usable speakers came from a fetch stopped at 41%.
+4. **Corpus expansion.** 510 usable speakers came from a fetch stopped at 41%.
    Completing `train-clean-360` reaches ~761; `train-other-500` adds ~1,100.
    Bandwidth-bound, not compute-bound. Note §22 weakens the *urgency*: the
    binding constraint was the extractor's speaker count and that has been
    bought rather than collected. More speakers now buy back-end quality only.
 
-6. **Build an abstention mechanism for the neural extractor.** §22 records that
+5. **Build an abstention mechanism for the neural extractor.** §22 records that
    ECAPA has no notion of a recording too short to support a comparison — it
    returns a vector for any input, so unlike the i-vector front-end it has no
    operating point at which it says it cannot tell. A forensic deployment needs
