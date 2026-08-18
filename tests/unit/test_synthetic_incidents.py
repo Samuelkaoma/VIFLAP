@@ -28,6 +28,7 @@ from scripts.synthesise_incidents import (
     SCRIPT_MOVES,
     generate,
 )
+from viflap.analysis.behaviour.profile import MIN_WORDS_IDIOLECT, build_profile
 
 
 @pytest.fixture
@@ -87,6 +88,47 @@ class TestGenerativeStructure:
         pools = {o.operation_id: set(o.sim_pool) for o in operations}
         for incident in incidents:
             assert incident.msisdn in pools[incident.operation_id]
+
+    def test_transcripts_clear_the_idiolect_floor(self, corpus) -> None:
+        """Otherwise half the behavioural stream is switched off, silently.
+
+        ``BehaviouralComparator`` withholds the idiolect term below
+        ``MIN_WORDS_IDIOLECT`` and still returns a score — the script term alone.
+        A corpus of short transcripts therefore exercises the stream's plumbing
+        while never touching the component the authorship literature is about,
+        and nothing fails to say so. This is the guard on that.
+        """
+        _, _, incidents = corpus
+        lengths = [
+            build_profile(incident.transcript, frozenset({"the", "you", "i", "is"})).n_words
+            for incident in incidents
+        ]
+        assert min(lengths) >= MIN_WORDS_IDIOLECT, (
+            f"shortest transcript is {min(lengths)} words against a floor of "
+            f"{MIN_WORDS_IDIOLECT}"
+        )
+
+    def test_the_operator_length_habit_reaches_the_transcript(self, corpus) -> None:
+        """``words_per_utterance`` was drawn per operator and never read.
+
+        A declared idiolect parameter with no consequence is worse than none: it
+        reads as though the corpus varies along an axis it does not.
+        """
+        operators, _, incidents = corpus
+        habit = {o.operator_id: o.words_per_utterance for o in operators}
+        by_operator: dict[str, list[float]] = {}
+        for incident in incidents:
+            turns = incident.transcript.split(" . ")
+            mean_length = sum(len(t.split()) for t in turns) / len(turns)
+            by_operator.setdefault(incident.operator_id, []).append(mean_length)
+
+        # Two operators with clearly different habits must differ in the
+        # transcripts they produce.
+        ranked = sorted(by_operator, key=lambda name: habit[name])
+        shortest, longest = ranked[0], ranked[-1]
+        assert habit[shortest] < habit[longest]
+        mean = lambda values: sum(values) / len(values)  # noqa: E731
+        assert mean(by_operator[shortest]) < mean(by_operator[longest])
 
     def test_generation_is_reproducible(self, corpus) -> None:
         _, _, incidents = corpus

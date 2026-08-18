@@ -29,6 +29,8 @@ from collections.abc import Mapping
 import pytest
 
 from viflap.analysis.behaviour.profile import (
+    MIN_WORDS_IDIOLECT,
+    MIN_WORDS_SCRIPT,
     BehaviouralComparator,
     BehaviouralProfile,
     BehaviouralScore,
@@ -179,9 +181,18 @@ def comparator(profiles: dict[str, BehaviouralProfile]) -> BehaviouralComparator
     under test is the honest small-scale stand-in: it gives every category a
     non-zero background frequency, so no likelihood ratio here is an artefact of
     a category the background happened never to have seen.
+
+    ``min_words_idiolect=1`` because these transcripts are a few dozen words and
+    the deployed floor is 500. Every test using this fixture is about the
+    *decomposition* — which component moves when the operator changes, where the
+    n-gram term is counted — and none of them is about admissibility. Left at
+    the default the idiolect term would be withheld throughout and those tests
+    would pass while asserting nothing, which is worse than failing.
+    ``TestTheIdiolectFloor`` covers the rule itself.
     """
     every = list(profiles.values())
     return BehaviouralComparator(
+        min_words_idiolect=1,
         function_word_background=_background(
             _pool(*(p.function_word_counts for p in every)), "pooled function words"
         ),
@@ -480,3 +491,119 @@ class TestDelegationSignature:
         same_operator = comparator.score(profiles["a_one"], profiles["a_two"])
 
         assert same_operator.idiolect_log_lr > delegated.idiolect_log_lr
+
+
+class TestTheIdiolectFloor:
+    """The two components have different floors, because only one has a citation.
+
+    §13 recorded that a 40-word floor is indefensible against the authorship
+    literature, and the fix is not simply a larger number. The literature's
+    length requirements were measured for authorship attribution, which is what
+    the *idiolect* term does; move-inventory comparison is a different task with
+    no comparable published requirement. One threshold would therefore have to be
+    either too high for the script term or too low for the idiolect term, and at
+    40 it was the latter.
+
+    ``MIN_WORDS_IDIOLECT`` comes from Ishihara (2017), *Forensic Science
+    International*, which evaluated an LR-based forensic text comparison system
+    on predatory chatlog messages at 500, 1000, 1500 and 2500 tokens. 500 is the
+    smallest size it tested, and the fused system reached only ``C_llr`` 0.54
+    there against 0.15 at 1500 — so this floor admits evidence that study calls
+    weak and refuses everything below the weakest published point.
+    """
+
+    def _comparator(self, profiles, **overrides) -> BehaviouralComparator:
+        every = list(profiles.values())
+        return BehaviouralComparator(
+            function_word_background=_background(
+                _pool(*(p.function_word_counts for p in every)), "pooled function words"
+            ),
+            disfluency_background=_background(
+                _pool(*(p.disfluency_counts for p in every)), "pooled disfluencies"
+            ),
+            move_background=_background(
+                _pool(*(p.move_counts for p in every)), "pooled moves"
+            ),
+            ngram_background=_background(
+                _pool(*(p.character_ngram_counts for p in every)),
+                "pooled character n-grams",
+            ),
+            **overrides,
+        )
+
+    def test_the_default_floor_is_the_published_one(self) -> None:
+        assert MIN_WORDS_IDIOLECT == 500
+        assert MIN_WORDS_SCRIPT == 40
+
+    def test_a_profile_is_still_built_below_the_idiolect_floor(self) -> None:
+        """The floors are separate, and this is what separates them.
+
+        Refusing to build the profile would take the script term down with the
+        idiolect term, and the move inventory is recoverable from far less text.
+        """
+        profile = build_profile(OPERATOR_A_SCRIPT_ONE, FUNCTION_WORDS)
+        assert profile.n_words < MIN_WORDS_IDIOLECT
+        assert profile.move_counts
+
+    def test_the_idiolect_term_is_withheld_below_the_floor(self, profiles) -> None:
+        score = self._comparator(profiles).score(profiles["a_one"], profiles["b_one"])
+        assert score.idiolect_withheld
+        assert score.idiolect_log_lr == 0.0
+        assert score.total_log_lr == pytest.approx(score.script_log_lr)
+
+    def test_the_withholding_is_visible_and_not_merely_a_zero(self, profiles) -> None:
+        """A zero that means "not measured" must not read as "uninformative"."""
+        score = self._comparator(profiles).score(profiles["a_one"], profiles["b_one"])
+        assert score.diagnostics["idiolect_withheld"] == 1.0
+        assert score.diagnostics["min_words_idiolect"] == float(MIN_WORDS_IDIOLECT)
+
+    def test_a_withheld_idiolect_never_manufactures_a_delegation_finding(
+        self, profiles
+    ) -> None:
+        """The failure this guard exists to stop, on the clearest possible case.
+
+        A transcript compared with itself is certainly one speaker. Its script
+        term is 2.46, above the log(10) trigger, and with the idiolect withheld
+        the ratio test compares that against zero — so the unguarded flag reports
+        "one operation, more than one operator" about a text and itself. The
+        absence of the contradicting evidence would have become the finding.
+        """
+        score = self._comparator(profiles).score(profiles["a_one"], profiles["a_one"])
+        assert score.idiolect_withheld
+        assert score.script_log_lr > math.log(10.0)
+        assert not score.suggests_shared_operation_not_speaker
+
+    def test_above_the_floor_the_idiolect_term_is_scored(self, profiles) -> None:
+        long_a = build_profile((OPERATOR_A_SCRIPT_ONE + " ") * 5, FUNCTION_WORDS)
+        long_b = build_profile((OPERATOR_B_SCRIPT_ONE + " ") * 5, FUNCTION_WORDS)
+        assert min(long_a.n_words, long_b.n_words) >= MIN_WORDS_IDIOLECT
+
+        score = self._comparator(profiles).score(long_a, long_b)
+        assert not score.idiolect_withheld
+        assert score.idiolect_log_lr != 0.0
+
+    def test_the_shorter_of_the_two_transcripts_decides(self, profiles) -> None:
+        """A long reference cannot rescue a short questioned sample.
+
+        The likelihood ratio is a statement about the pair, and it is the
+        sparser of the two profiles that limits what can be estimated.
+        """
+        long_a = build_profile((OPERATOR_A_SCRIPT_ONE + " ") * 5, FUNCTION_WORDS)
+        score = self._comparator(profiles).score(long_a, profiles["b_one"])
+        assert score.idiolect_withheld
+
+    def test_the_idiolect_floor_cannot_be_set_below_the_profile_floor(
+        self, profiles
+    ) -> None:
+        """Otherwise the lower bound would be unreachable and silently inert."""
+        comparator = self._comparator(profiles, min_words=100, min_words_idiolect=10)
+        assert comparator._min_words_idiolect == 100
+
+    def test_the_floor_is_configurable_for_a_deployment_that_justifies_it(
+        self, profiles
+    ) -> None:
+        """Ishihara's own optimum is 1500 tokens, not 500, and a deployment that
+        can supply it should be able to say so."""
+        comparator = self._comparator(profiles, min_words_idiolect=1)
+        score = comparator.score(profiles["a_one"], profiles["b_one"])
+        assert not score.idiolect_withheld

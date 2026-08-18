@@ -117,6 +117,13 @@ PARAMETER_PROVENANCE: dict[str, str] = {
         "ASSUMED. The SIM pool's scale is grounded; that operators keep to a "
         "preferred handset within an operation's pool is not."
     ),
+    "transcript_length": (
+        "ASSUMED. Drawn at 600-1000 words so transcripts clear the idiolect "
+        "floor of MIN_WORDS_IDIOLECT (500), which is itself from Ishihara "
+        "(2017). A three-minute call at conversational rate is roughly 450 "
+        "words, so this is call-length rather than arbitrary, but no Zambian "
+        "distribution of fraud-call durations was found to fit it to."
+    ),
     "cell_sites": (
         "ASSUMED. That the Lusaka operation worked from one premises is "
         "grounded, so few cells is the right shape; the identifiers and their "
@@ -355,8 +362,35 @@ def _draw_operation(
     )
 
 
+#: What a caller says while working a move — re-asking, pressing, filling.
+#: Generic across moves deliberately: the move's content is in its stem, and
+#: what surrounds it is conversational padding, which is exactly where the
+#: function words and disfluencies carrying the idiolect live. Keeping it out of
+#: the stems is what stops the idiolect features from becoming a second copy of
+#: the script.
+CONTINUATIONS: tuple[str, ...] = (
+    "are you there madam",
+    "can you hear me properly on this line",
+    "i will wait while you check the phone",
+    "it is very important that you do it now",
+    "no there is no problem with doing it this way",
+    "yes that is correct just continue like that",
+    "let me explain it again so that it is clear to you",
+    "do not put the phone down please",
+    "we have many other customers waiting on this same issue",
+    "the system is showing me your details here on my screen",
+)
+
+
 def _utterance(rng: np.random.Generator, operator: Operator, move: str) -> str:
-    """One line of dialogue: the move's content in the operator's habits."""
+    """One turn of dialogue: the move's content, at the operator's usual length.
+
+    ``words_per_utterance`` was drawn per operator from the beginning and never
+    read, so the one idiolect parameter with an obvious surface consequence had
+    none. It sets the target length here, and turns are only ever *extended* to
+    reach it — truncating could cut the cue phrase that makes the move
+    detectable, which would silently remove moves from the script term.
+    """
     stems = {
         "greet": "good morning madam this is calling from",
         "establish_authority": "i am the agent handling your account today",
@@ -369,6 +403,10 @@ def _utterance(rng: np.random.Generator, operator: Operator, move: str) -> str:
         "close": "thank you for your cooperation have a good day",
     }
     words = stems.get(move, "yes madam").split()
+    target = max(int(round(operator.words_per_utterance)), 6)
+    while len(words) < target:
+        words.extend(str(rng.choice(CONTINUATIONS)).split())
+
     markers = list(operator.marker_weights)
     probabilities = np.array([operator.marker_weights[m] for m in markers])
     probabilities = probabilities / probabilities.sum()
@@ -379,6 +417,36 @@ def _utterance(rng: np.random.Generator, operator: Operator, move: str) -> str:
         if rng.random() < operator.disfluency_rate:
             out.append(str(rng.choice(markers, p=probabilities)))
     return " ".join(out)
+
+
+def _transcript(
+    rng: np.random.Generator, operator: Operator, operation: Operation
+) -> str:
+    """A whole call: every move once, then more turns until it is call-length.
+
+    A nine-move script at one turn per move ran to about a hundred words, which
+    is not a phone call — it is a summary of one. Three minutes of conversational
+    speech is roughly 450 words, and
+    :data:`~viflap.analysis.behaviour.profile.MIN_WORDS_IDIOLECT` is 500, so a
+    corpus of hundred-word transcripts could only ever exercise the script term
+    and would have made the idiolect half of this stream untestable end to end.
+
+    Extra turns repeat moves rather than inventing new ones, which is what a
+    caller working a resistant victim actually does: the move inventory is the
+    operation's and does not grow because the call ran long.
+    """
+    turns = [_utterance(rng, operator, move) for move in operation.move_order]
+    n_words = sum(len(turn.split()) for turn in turns)
+    target = int(rng.integers(600, 1000))
+
+    while n_words < target:
+        for move in operation.move_order:
+            turn = _utterance(rng, operator, move)
+            turns.append(turn)
+            n_words += len(turn.split())
+            if n_words >= target:
+                break
+    return " . ".join(turns)
 
 
 def _draw_calls(
@@ -477,9 +545,7 @@ def generate(
                 minute=int(rng.integers(0, 60)),
             )
             duration = float(rng.lognormal(mean=4.9, sigma=0.5))
-            transcript = " . ".join(
-                _utterance(rng, operator, move) for move in operation.move_order
-            )
+            transcript = _transcript(rng, operator, operation)
             imei = preferred[(operation.operation_id, operator.operator_id)]
             if rng.random() < 0.2:
                 imei = str(rng.choice(list(operation.imei_pool)))

@@ -52,12 +52,14 @@ puts audio on this path.
 
 A coupling worth knowing about
 ------------------------------
-Transcripts here run to roughly a hundred words, against ``build_profile``'s
-``min_words`` default of 40. §13 records that the authorship literature's floor is
-2,500-5,000 words and that 40 is indefensible against it. Raising the default to
-anything realistic makes every incident in this corpus refuse the behavioural
-stream — which is the correct behaviour, and it means the two pieces of work have
-to move together rather than one silently breaking the other.
+Transcripts here are generated at 600-1000 words specifically to clear
+:data:`~viflap.analysis.behaviour.profile.MIN_WORDS_IDIOLECT`, which is 500. They
+were about a hundred words when this module was first written, and at that length
+the behavioural stream would have run with its idiolect term withheld throughout
+— producing script evidence only, and doing so silently as far as any assertion
+here was concerned. The two move together: shortening the corpus or raising the
+floor turns half this stream off, and the way to notice is
+``idiolect_was_withheld`` in the behavioural diagnostics rather than a failure.
 """
 
 from __future__ import annotations

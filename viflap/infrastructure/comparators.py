@@ -231,6 +231,11 @@ class BehaviouralStreamComparator(CalibratedStreamComparator):
             **score.diagnostics,
             "idiolect_component": score.idiolect_log_lr,
             "script_component": score.script_log_lr,
+            # Zero in ``idiolect_component`` is ambiguous on its own — it is
+            # either "measured, and uninformative" or "not measured". Without
+            # this flag beside it a reader cannot tell which, and the two
+            # licence different readings of the same total.
+            "idiolect_was_withheld": float(score.idiolect_withheld),
             "suggests_delegation": float(score.suggests_shared_operation_not_speaker),
         }
 

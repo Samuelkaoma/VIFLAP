@@ -183,6 +183,22 @@ class TestEveryStreamReachesTheEngine:
         assert "script_component" in diagnostics
         assert "suggests_delegation" in diagnostics
 
+    def test_the_idiolect_term_is_actually_scored(
+        self, system, enrolled, analyst, case_ref
+    ) -> None:
+        """The corpus must be long enough to reach the half that has a citation.
+
+        The behavioural comparator withholds the idiolect term below
+        ``MIN_WORDS_IDIOLECT`` and still returns a score from the script term
+        alone, so every other assertion in this file passes either way. Without
+        this one, shortening the transcripts would quietly reduce the stream to
+        its unbenchmarked half.
+        """
+        result = _compare(system, analyst, case_ref, enrolled[0], enrolled[1])
+        diagnostics = result.outcomes[EvidenceStream.BEHAVIOURAL].diagnostics
+        assert diagnostics["idiolect_was_withheld"] == 0.0
+        assert diagnostics["idiolect_component"] != 0.0
+
     def test_device_evidence_reports_the_rarity_it_rested_on(
         self, system, enrolled, analyst, case_ref
     ) -> None:

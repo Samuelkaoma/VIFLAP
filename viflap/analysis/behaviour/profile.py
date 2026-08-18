@@ -57,6 +57,8 @@ from viflap.domain.errors import InsufficientDataError
 from viflap.domain.evidence import EvidenceStream
 
 __all__ = [
+    "MIN_WORDS_IDIOLECT",
+    "MIN_WORDS_SCRIPT",
     "BehaviouralComparator",
     "BehaviouralProfile",
     "BehaviouralScore",
@@ -64,6 +66,44 @@ __all__ = [
     "ScriptMove",
     "segment_script_moves",
 ]
+
+#: Words below which the **idiolect** term is withheld, from the nearest
+#: published forensic operating point rather than from judgement.
+#:
+#: Ishihara, S. (2017), "Strength of linguistic text evidence: A fused forensic
+#: text comparison system", *Forensic Science International*,
+#: doi:10.1016/j.forsciint.2017.06.040. Predatory chatlog messages from 115
+#: authors, evaluated in the likelihood-ratio framework at 500, 1000, 1500 and
+#: 2500 tokens. That register — conversational, turn-taking, transcribed
+#: informal speech — is the closest published match to a fraud-call transcript;
+#: the 2,500-5,000 word figure §13 quotes is from literary authorship and is the
+#: wrong denominator for this material.
+#:
+#: 500 is the smallest sample size that study evaluated. It is emphatically not
+#: a size at which the method works well: the fused system reached ``C_llr``
+#: 0.54 there and the best single procedure 0.68, against 0.15 at 1500 tokens,
+#: which is where that paper puts its own optimum. So this floor admits evidence
+#: the literature calls weak, and refuses everything below the weakest point
+#: anyone has published a number for. Raising it to 1500 would be defensible on
+#: the same citation and would refuse most single calls.
+#:
+#: The comparison is approximate in one respect worth stating: Ishihara counts
+#: whitespace tokens and this counts words as :func:`tokenise` finds them, so
+#: the two differ by roughly the punctuation rate.
+MIN_WORDS_IDIOLECT = 500
+
+#: Words below which no profile is built at all, and therefore the floor on the
+#: **script** term.
+#:
+#: Deliberately left at the original value, and deliberately not given a
+#: citation, because there is none. §13 records that move-inventory and
+#: move-sequence comparison is not an authorship task and that no comparable
+#: literature was found for it, so the length requirements above do not transfer
+#: and inventing a number that looked derived would be worse than keeping an
+#: admitted guess. What has changed is that it no longer gates the idiolect term
+#: as well, which is what made it indefensible: an authorship-derived floor was
+#: being set by a task authorship research has never studied.
+MIN_WORDS_SCRIPT = 40
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,17 +280,22 @@ def build_profile(
     disfluencies: DisfluencyInventory | None = None,
     identifier: LanguageIdentifier | None = None,
     ngram_order: int = 4,
-    min_words: int = 40,
+    min_words: int = MIN_WORDS_SCRIPT,
 ) -> BehaviouralProfile:
     """Reduce a transcript to a behavioural profile.
 
     Raises
     ------
     InsufficientDataError
-        Below ``min_words``. Function word profiles from short texts are
+        Below ``min_words``, which defaults to :data:`MIN_WORDS_SCRIPT` — the
+        floor for building a profile at all, not the floor for treating its
+        idiolect counts as evidence. Function word profiles from short texts are
         dominated by sampling noise: forty words contain perhaps fifteen
         function word tokens, and no stable distribution is recoverable from
-        that.
+        that. The profile is still built, because the move inventory is
+        recoverable from far less text; it is
+        :class:`BehaviouralComparator` that declines to score the idiolect
+        below :data:`MIN_WORDS_IDIOLECT`.
     """
     disfluencies = disfluencies or DisfluencyInventory()
     tokens = tokenise(transcript)
@@ -349,6 +394,14 @@ class BehaviouralScore:
     total_log_lr: float
     diagnostics: Mapping[str, float]
 
+    idiolect_withheld: bool = False
+    """Whether the idiolect term was withheld for want of text, in which case
+    ``idiolect_log_lr`` is zero because nothing was measured rather than because
+    the evidence was neutral. The two are not the same and the distinction has
+    to survive into the result: a zero that means "we did not look" and a zero
+    that means "we looked and found nothing" support very different readings of
+    the same total."""
+
     @property
     def suggests_shared_operation_not_speaker(self) -> bool:
         """Whether the script links substantially more strongly than the idiolect.
@@ -369,7 +422,17 @@ class BehaviouralScore:
         never as a finding. Establishing it properly requires calibrating the two
         components separately against pairs known to be same-operation-different-
         speaker, which needs labelled data the corpus does not yet contain.
+
+        **Never fires when the idiolect term was withheld.** With
+        ``idiolect_log_lr`` held at zero for want of text, script evidence of any
+        strength satisfies the ratio automatically, and the flag would report
+        "one operation, more than one operator" on every short transcript — a
+        finding manufactured entirely by the absence of the evidence that was
+        supposed to contradict it. Delegation is a claim about the speaker, and
+        it cannot be made by a comparison that declined to examine one.
         """
+        if self.idiolect_withheld:
+            return False
         return self.script_log_lr > math.log(10.0) and self.script_log_lr > 2.5 * max(
             self.idiolect_log_lr, 0.0
         )
@@ -392,8 +455,26 @@ class BehaviouralComparator:
         ngram_background: BackgroundPopulation,
         switch_background: BackgroundPopulation | None = None,
         utterance_length_model: NormalInverseGammaComparator | None = None,
-        min_words: int = 40,
+        min_words: int = MIN_WORDS_SCRIPT,
+        min_words_idiolect: int = MIN_WORDS_IDIOLECT,
     ) -> None:
+        """
+        Parameters
+        ----------
+        min_words:
+            Floor for producing any comparison at all, and therefore for the
+            script term. See :data:`MIN_WORDS_SCRIPT` on why it carries no
+            citation.
+        min_words_idiolect:
+            Floor for the idiolect term, from :data:`MIN_WORDS_IDIOLECT`. Two
+            floors rather than one because the components answer different
+            questions and the published length requirements exist for only one
+            of them. A single threshold has to be either too high for the script
+            term or too low for the idiolect term, and at 40 words it was the
+            latter: the strongest authorship features in the system were being
+            scored on transcripts an order of magnitude below anything the
+            forensic literature has evaluated.
+        """
         # Concentrations differ by what each inventory is like. Function words
         # are a small, universally shared inventory, so an actor's distribution
         # is close to the population's and the concentration is high. Character
@@ -414,6 +495,7 @@ class BehaviouralComparator:
         )
         self._utterance_lengths = utterance_length_model
         self._min_words = min_words
+        self._min_words_idiolect = max(min_words_idiolect, min_words)
 
     @property
     def stream(self) -> EvidenceStream:
@@ -431,43 +513,58 @@ class BehaviouralComparator:
                 required=self._min_words,
             )
 
+        # Withheld rather than computed and reported small. The idiolect
+        # components are the ones the forensic length requirements were measured
+        # for, and below that floor they do not become weak — they become
+        # unmeasured, while still producing a number that looks like the others.
+        idiolect_withheld = (
+            min(first.n_words, second.n_words) < self._min_words_idiolect
+        )
+
         idiolect = 0.0
-        if first.function_word_counts and second.function_word_counts:
-            idiolect += self._function_words.log_likelihood_ratio(
-                first.function_word_counts, second.function_word_counts
-            )
-        if first.disfluency_counts and second.disfluency_counts:
-            idiolect += self._disfluencies.log_likelihood_ratio(
-                first.disfluency_counts, second.disfluency_counts
-            )
-        if self._switches is not None and first.switch_counts and second.switch_counts:
-            idiolect += self._switches.log_likelihood_ratio(
-                first.switch_counts, second.switch_counts
-            )
-        if self._utterance_lengths is not None:
-            idiolect += self._utterance_lengths.log_likelihood_ratio(
-                first.log_utterance_lengths, second.log_utterance_lengths
-            )
-        # Character n-grams are an idiolect feature, and were counted as script
-        # evidence until now. The authorship attribution literature reports them
-        # repeatedly as the single best-performing feature for identifying a
-        # *person* — they encode morphology, characteristic spellings,
-        # punctuation and capitalisation habits — so the strongest speaker
-        # signal available was sitting in the one component whose entire purpose
-        # is to survive a change of speaker. It was large enough to reverse the
-        # sign of that component, which is how the defect was found.
-        #
-        # This is not a clean separation and should not be reported as one. A
-        # scripted transcript's n-grams also carry the script's fixed wording,
-        # so some genuinely operation-level evidence moves across with them.
-        # Restricting them to script-bearing spans is the better fix and needs
-        # labelled same-operation-different-speaker data the corpus does not
-        # have. Placing them where the literature says they belong is the
-        # defensible choice in the meantime; leaving them where they were is not.
-        if first.character_ngram_counts and second.character_ngram_counts:
-            idiolect += self._ngrams.log_likelihood_ratio(
-                first.character_ngram_counts, second.character_ngram_counts
-            )
+        if not idiolect_withheld:
+            if first.function_word_counts and second.function_word_counts:
+                idiolect += self._function_words.log_likelihood_ratio(
+                    first.function_word_counts, second.function_word_counts
+                )
+            if first.disfluency_counts and second.disfluency_counts:
+                idiolect += self._disfluencies.log_likelihood_ratio(
+                    first.disfluency_counts, second.disfluency_counts
+                )
+            if (
+                self._switches is not None
+                and first.switch_counts
+                and second.switch_counts
+            ):
+                idiolect += self._switches.log_likelihood_ratio(
+                    first.switch_counts, second.switch_counts
+                )
+            if self._utterance_lengths is not None:
+                idiolect += self._utterance_lengths.log_likelihood_ratio(
+                    first.log_utterance_lengths, second.log_utterance_lengths
+                )
+            # Character n-grams are an idiolect feature, and were counted as
+            # script evidence until now. The authorship attribution literature
+            # reports them repeatedly as the single best-performing feature for
+            # identifying a *person* — they encode morphology, characteristic
+            # spellings, punctuation and capitalisation habits — so the
+            # strongest speaker signal available was sitting in the one
+            # component whose entire purpose is to survive a change of speaker.
+            # It was large enough to reverse the sign of that component, which
+            # is how the defect was found.
+            #
+            # This is not a clean separation and should not be reported as one.
+            # A scripted transcript's n-grams also carry the script's fixed
+            # wording, so some genuinely operation-level evidence moves across
+            # with them. Restricting them to script-bearing spans is the better
+            # fix and needs labelled same-operation-different-speaker data the
+            # corpus does not have. Placing them where the literature says they
+            # belong is the defensible choice in the meantime; leaving them
+            # where they were is not.
+            if first.character_ngram_counts and second.character_ngram_counts:
+                idiolect += self._ngrams.log_likelihood_ratio(
+                    first.character_ngram_counts, second.character_ngram_counts
+                )
 
         script = 0.0
         if first.move_counts and second.move_counts:
@@ -489,7 +586,14 @@ class BehaviouralComparator:
                 "switch_rate_second": second.switch_rate,
                 "n_moves_first": float(len(first.move_sequence)),
                 "n_moves_second": float(len(second.move_sequence)),
+                # Carried in the diagnostics as well as on the score, because
+                # the adapter flattens the score to its total before the result
+                # is built and this is the only route by which "the idiolect was
+                # never examined" reaches whoever reads the likelihood ratio.
+                "idiolect_withheld": float(idiolect_withheld),
+                "min_words_idiolect": float(self._min_words_idiolect),
             },
+            idiolect_withheld=idiolect_withheld,
         )
 
 

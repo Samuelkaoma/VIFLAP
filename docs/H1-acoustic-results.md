@@ -1443,6 +1443,108 @@ obviously transfer to it. The benchmark bites on the **idiolect** component —
 function words, disfluencies, character n-grams — which is exactly the component
 those methods were built for.
 
+### The forensic operating point, and the floor it now sets
+
+> **Resolved.** The first version of this subsection had only the literary
+> figure and called 40 words indefensible against it, which was right about the
+> verdict and wrong about the comparison. The literary number is the wrong
+> denominator: novels are not fraud calls. The search that should have happened
+> then has now been done, and the register-matched forensic figure is below.
+
+Ishihara (2017) is the closest published operating point to this material.[^ish]
+It evaluates an LR-based forensic text comparison system on **predatory chatlog
+messages** from 115 authors — conversational, turn-taking, transcribed informal
+speech, which is the nearest published register to a transcribed fraud call —
+at four sample sizes. `C_llr`, best configuration of each procedure:
+
+| Tokens | MVKD features | Character *N*-grams | Token *N*-grams | **Fused** | Fused EER |
+|---:|---:|---:|---:|---:|---:|
+| 500 | 0.68 | — | 0.97 | **0.54** | — |
+| 1000 | 0.53 | — | 0.90 | **0.42** | 0.10 |
+| 1500 | 0.35 | 0.41 | 0.65 | **0.15** | 0.05 |
+| 2500 | 0.21 | 0.57 | 0.57 | **0.20** | 0.02 |
+
+Three things follow, and only the first is about a threshold.
+
+**500 tokens is the smallest size anyone has published a number for**, and the
+number is weak: 0.54 fused, 0.68 for the best single procedure. That is worse
+than §9's acoustic `C_llr_min` of 0.276 at 30 s. So a floor set at 500 admits
+evidence this literature itself calls weak, and refuses everything below the
+weakest published point. That is the defensible place to put it, and it is where
+it now is.
+
+**The paper's own optimum is 1,500 tokens**, not 500 — the fused system improves
+from 0.42 to 0.15 between 1,000 and 1,500, the largest step in the table, and
+then *deteriorates* to 0.20 at 2,500. A deployment able to supply 1,500 words
+should say so; the parameter is exposed for that.
+
+**More data is not monotonically better**, which is worth recording because it
+is the opposite of what §9 found for speakers. The character *N*-gram procedure
+degrades from 0.41 to 0.57 going from 1,500 to 2,500 tokens, and the fused
+system with it.
+
+A second and more recent source puts a lower bound on the same question.
+Barlow, Nini and Manino (2026) evaluate authorship verification across fifteen
+corpora at 100–9,500 tokens.[^bnm] On the Bolt SMS/chat corpus — 100 to 500
+tokens, the shortest material in that study — they report strong performance
+across all three of their approaches from **200 tokens** of questioned and known
+data upward. On Twitter data the worst condition they report, at 500 tokens of
+known data, still held `C_llr` at or below 0.39.
+
+So the forensic range across these two is roughly **200 to 1,500 tokens**
+depending on method and register, and 500 sits inside it rather than at either
+end. It is not conservative and it is not aggressive; it is the smallest figure
+the register-matched study measured.
+
+[^ish]: Ishihara, S. (2017). "Strength of linguistic text evidence: A fused
+forensic text comparison system." *Forensic Science International*.
+doi:10.1016/j.forsciint.2017.06.040. Background database 38 authors; ELUB
+applied because unrealistically strong LRs were observed, which is the same
+correction §15 applies here.
+
+[^bnm]: Barlow, S., Nini, A. and Manino, E. (2026). "Normalisation-Based
+Likelihood Ratio Estimation for Forensic Authorship Verification."
+arXiv:2607.09501.
+
+**One caveat on the comparison.** Ishihara counts whitespace tokens; `n_words`
+here counts words as `tokenise` finds them. The two differ by roughly the
+punctuation rate, so the floor is accurate to within perhaps ten percent, which
+is far finer than the quantity warrants.
+
+### One floor was the error, not one number
+
+Raising 40 to 500 across the board would have been wrong in the other direction.
+The published requirements were measured for authorship attribution — which is
+what the **idiolect** term does — and this section already records that script
+structure is a different task with no comparable literature. A single threshold
+must therefore be either too high for the script term or too low for the
+idiolect term. At 40 it was the latter.
+
+`BehaviouralComparator` now carries two:
+
+| | Value | Basis |
+|---|---:|---|
+| `MIN_WORDS_SCRIPT` | 40 | **none, and marked as having none.** Unchanged, because no length requirement for move-sequence comparison was found and inventing one that looked derived would be worse than keeping an admitted guess. Below it no profile is built at all. |
+| `MIN_WORDS_IDIOLECT` | 500 | Ishihara (2017), above. Below it the idiolect term is **withheld**, not computed and reported small. |
+
+Withheld matters. Below the floor `idiolect_log_lr` is zero because nothing was
+measured, which is a different statement from zero because the evidence was
+neutral, and the two licence different readings of the same total. The
+distinction is carried on the score and in the diagnostics
+(`idiolect_was_withheld`) rather than left to be inferred.
+
+**And withholding it created a defect that had to be guarded.**
+`suggests_shared_operation_not_speaker` fires when the script term substantially
+outruns the idiolect term. With the idiolect held at zero, *any* script evidence
+above the trigger satisfies that ratio automatically — so the flag would have
+reported "one operation, more than one operator" on every short transcript, a
+delegation finding manufactured entirely by the absence of the evidence meant to
+contradict it. On the test fixtures a transcript compared **with itself** has a
+script term of 2.46 against a trigger of log 10 = 2.30, so the unguarded flag
+asserted delegation about a text and a copy of itself. The flag now returns
+false whenever the idiolect was withheld, and the self-comparison case is the
+regression test.
+
 ### The literature makes the n-gram defect worse
 
 The test suite records that character n-grams are counted as *script* evidence
@@ -1466,8 +1568,9 @@ Setting expectations from the literature rather than from hope:
 
 | | Expectation |
 |---|---|
-| Idiolect on 40-word transcripts | unusable; far below any published operating point |
-| Idiolect on several hundred words | weak — forensic n-gram work reports `C_llr < 0.75` as a *goal* |
+| Idiolect on 40-word transcripts | unusable; far below any published operating point — **now refused rather than scored** |
+| Idiolect at 500 words | weak: 0.54 fused, 0.68 best single procedure, on register-matched chatlog data |
+| Idiolect at 1,500 words | 0.15 fused — comparable to the acoustic stream, and the cited study's own optimum |
 | Script structure | unbenchmarked; not an authorship task, and no comparable literature was found |
 
 This has a consequence for §11. That simulation assigned the behavioural stream
@@ -1483,6 +1586,15 @@ weaker behavioural marginal is cheap and should be done before any figure from
 1. **Raise `min_words` and document the basis.** Forty words is not defensible
    against any published operating point. The figure chosen should cite what it
    is derived from.
+
+   > **Done.** `MIN_WORDS_IDIOLECT = 500`, from Ishihara (2017) on predatory
+   > chatlog messages — see "The forensic operating point" above for the table
+   > it comes from and for why the answer turned out to be *two* floors rather
+   > than a larger single one. `MIN_WORDS_SCRIPT` stays at 40 and is now
+   > explicitly marked as having no citation, because it still has none. The
+   > change also required a guard: withholding the idiolect term makes the
+   > delegation flag fire on anything with script evidence, including a
+   > transcript compared with itself.
 2. **Move character n-grams to the idiolect term**, or restrict them to
    script-bearing spans. The literature says plainly which component they belong
    to.

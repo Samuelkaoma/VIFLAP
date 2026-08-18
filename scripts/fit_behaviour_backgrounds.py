@@ -104,11 +104,20 @@ from viflap.analysis.patterns.conjugate import BackgroundPopulation
 #: that the tail stays frequent enough to estimate.
 DEFAULT_FUNCTION_WORD_COUNT = 150
 
-#: Words per pooled document. The comparator refuses transcripts below forty
-#: words, and the background must be estimated from documents of the same shape
-#: as the ones it will judge; single BIG-C utterances are far shorter than an
-#: incident transcript, so they are concatenated to a comparable length.
-DEFAULT_CHUNK_WORDS = 250
+#: Words per pooled document. The background must be estimated from documents of
+#: the same shape as the ones it will judge, and single BIG-C utterances are far
+#: shorter than an incident transcript, so they are concatenated.
+#:
+#: Raised from 250 when the idiolect floor moved to
+#: :data:`~viflap.analysis.behaviour.profile.MIN_WORDS_IDIOLECT` (500). The old
+#: value was chosen against the 40-word floor and would now estimate the
+#: idiolect backgrounds from documents half the length of the shortest one the
+#: comparator will ever score. That matters most for the character n-gram
+#: inventory, whose type count grows with document length: a background pooled
+#: from short documents has seen fewer types, so it reserves its unseen mass
+#: over a smaller inventory and makes genuinely common n-grams look rarer than
+#: they are.
+DEFAULT_CHUNK_WORDS = 600
 
 
 def read_bigc(path: Path) -> tuple[list[str], list[str]]:
