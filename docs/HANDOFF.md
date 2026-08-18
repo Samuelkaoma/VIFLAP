@@ -45,7 +45,7 @@ powershell -Command "Get-CimInstance Win32_Process -Filter 'Name=\"python.exe\"'
 
 | | |
 |---|---|
-| Tests | **671, all passing** |
+| Tests | **700, all passing** |
 | ruff | clean (`viflap scripts tests`) |
 | mypy | **63 errors on `viflap`** — pre-existing baseline, not a regression |
 | Git | clean, all pushed, `main` |
@@ -78,32 +78,42 @@ acoustic_pooled_global.npz      306 spk, global allocation      §21 control
 acoustic_pooled_stratified.npz  306 spk, stratified allocation  §21
 pretrained/spkrec-ecapa-voxceleb/   ECAPA-TDNN, 89 MB, 192-dim
 countermeasure_english.npz      300 English spk                 §10
+pretrained/spkrec-ecapa-voxceleb/   ECAPA-TDNN, 89 MB, 192-dim  §22
 ```
 
-Current best remains the pooled i-vector model: `C_llr_min` 0.276, EER 7.89% at
-12.2 kbit/s clean, 30 s, 102 evaluation speakers.
+Embeddings and reports, all under the gitignored `data/reports/`:
+
+```
+neural_embeddings.npz     ECAPA over the whole corpus, 6.5 MB   §22
+neural_extraction.json    13 cells, 0 refusals anywhere         §22
+h1_neural.json            the §22 result table
+h1_neural_lda100.json     the §22 dimension control
+h1_pooled_ownership.json  the i-vector baseline §22 compares to
+```
+
+**Current best is now the borrowed ECAPA extractor with the same 306-speaker
+back-end: `C_llr_min` 0.099 [0.031, 0.230], EER 2.47% at 12.2 kbit/s clean, 30 s,
+102 evaluation speakers — the first `supported` cell in the document (§22).** The
+pooled i-vector model is 0.276 / 7.89% on the identical trial set and remains the
+reference implementation.
+
+Do not compare a new result against §9's table without checking which bootstrap
+it used. §9 quotes percentile intervals, §14 recomputed them as BCa, and §18
+recomputed those again under the symmetric ownership rule. `score_neural.py`
+inherits the §14 and §18 corrections, so `h1_pooled_ownership.json` — not §9 — is
+the like-for-like i-vector column.
 
 ---
 
 ## 3. Running now
 
-**`python -m scripts.extract_neural`** (no arguments, so all defaults: both
-corpora, durations 30/15/5, output `data/reports/neural_embeddings.npz`).
+**Nothing.** `extract_neural` completed (330 min, 13 cells, 0 refusals) and
+`score_neural` completed twice — once at the native 192 dimensions and once at
+`--lda-dimension 100` as a control. §22 is written and its numbers were read
+back off `h1_neural.json` rather than off the terminal.
 
-Progress log: `<scratchpad>/extract_neural.log`. At last check 1200/1539 of the
-training partition at ~4.5 s/rec. Expect the training partition, then
-development and evaluation at two conditions each. **Do not start another heavy
-job while it runs** — see §6.
-
-When it finishes:
-
-```bash
-python -m scripts.score_neural --resamples 2000
-```
-
-That fits LDA/WCCN/PLDA and scores the same 102 held-out speakers, writing
-`data/reports/h1_neural.json`. It has been exercised end to end on a fabricated
-archive; it has never seen real embeddings.
+Timings for planning: `extract_neural` 330 min end to end at ~6 s per recording
+per three durations; `score_neural --resamples 2000` 16 min.
 
 ---
 
@@ -139,6 +149,23 @@ re-deriving. Each is measured, and several are negative results.
   so the two distortions are **near-independent, not one a harsher version of
   the other**. §16's "bitrate knob moves 0.33 dB" is **withdrawn** as
   unreproducible; the real coder moves 2.48 dB and the model 1.79.
+- **§22** **A borrowed ECAPA-TDNN extractor with the same 306-speaker back-end
+  reaches `C_llr_min` 0.099 and EER 2.47% at 12.2 clean 30 s, against the
+  i-vector system's 0.276 and 7.89% on the identical trial set. Four of six
+  cells reach `supported` — the first anywhere in the document.** This is §12's
+  prediction confirmed one stage earlier: only the extractor's speaker count
+  changed, 306 → ~6,000. **The comparison is not paired**, so the direction is
+  not established at a stated confidence; the marginal intervals do overlap
+  slightly and §7 is the standing reminder that overlap decides nothing either
+  way. Control at `--lda-dimension 100` says the result is not an artefact of
+  the 192-dimensional transform.
+- **§13 (behavioural length)** `MIN_WORDS_IDIOLECT = 500` from Ishihara (2017)
+  on predatory chatlog messages; `MIN_WORDS_SCRIPT` stays at 40 and is marked as
+  having no citation, because it has none. Two floors, not one — the published
+  requirements were measured for authorship attribution, which is only the
+  idiolect half. Below the floor the idiolect term is **withheld**, and that
+  required a guard: with idiolect pinned at zero the delegation flag fires on
+  anything with script evidence, including a transcript compared with itself.
 - **§21** Condition stratification works as designed (speakers with a repeated
   condition 75.2% → 0%, per-speaker mean-bitrate SD 1.42 → 0.66 kbit/s) and
   **ψ₁ moved only 44.951 → 43.967**. The condition confound is **refuted** as
@@ -165,41 +192,46 @@ re-deriving. Each is measured, and several are negative results.
 
 ## 5. Open work, in priority order
 
-1. **Finish the neural extractor comparison.** Extraction is running. Then
-   `score_neural.py`, then write §22. Two things to state in the write-up: the
-   comparison is **not paired at the vector level** (both systems see the same
-   audio but produce different vectors, so no paired difference test as in §7
-   and §9), and 192 dimensions from 1,539 training embeddings is thinner than
-   the i-vector system's 100 — if PLDA looks unstable, rerun with
-   `--lda-dimension 100`, which costs seconds because extraction is separate.
+1. **Make §22's comparison paired.** This is the largest claim in the document
+   resting on marginal intervals, and §7 exists precisely to say that is not
+   good enough. The trial sets are **identical** at 30 s and 15 s (849
+   same-source, 132,796 different-source in both systems), so
+   `paired_bootstrap_over_speakers` applies directly — the only obstacle is that
+   neither `evaluate_h1.py` nor `score_neural.py` persists per-trial scores.
+   Add that (`compare_calibrators.py` already does it, for the same reason),
+   then run the four cells. Cheap: no re-extraction, no retraining.
+   **Do not pair the 5 s cells** — the i-vector front-end refused 12 and 73
+   recordings there and ECAPA refused none, so the trials do not correspond.
 
-2. **Wire the synthetic corpus into an end-to-end run.**
-   `scripts/synthesise_incidents.py` generates operators, operations and
-   incidents with the documented dependence structure. It is **not yet driving**
-   `tests/integration/test_pipeline.py`, which still uses a scalar
-   `SignatureComparator` test double. That wiring is the step that actually
-   exercises fusion, the validity gate and the audit chain on realistic
-   incidents. **Hard boundary: no figure from it is a result.** §11 already had
-   to be withdrawn for treating simulation output as measurement.
+2. **Rerun §21's ψ₁ question on the ECAPA embeddings.** They are on disk, so
+   this costs minutes. The extractor changed and the corpus did not: if the
+   spike is a LibriSpeech session effect it should survive; if it is an i-vector
+   length-normalisation artefact it should not. §22 reports ψ₁ = 66.98 but not
+   the ψ₁/ψ₂ *ratio*, which is the comparable quantity.
 
 3. **§11 has no intervals.** Point estimates from one seed in a document that
    insists on intervals everywhere. Repeat across seeds and bootstrap before
    quoting any figure. Also test misspecification — generate under a t-copula,
-   fit the Gaussian.
+   fit the Gaussian. §13's benchmark says the behavioural marginal used there
+   (0.75 of acoustic separation) is probably optimistic, and that should move in
+   the same pass.
 
-4. **Behavioural `min_words = 40`** is indefensible against a literature floor
-   of 2,500–5,000 words (§13). Raising it needs a published *forensic* operating
-   point to cite; do the search rather than invent a number.
+4. **Put audio on the synthetic pipeline.** `scripts/synthetic_pipeline.py`
+   drives four streams end to end with the real comparators, but not the
+   acoustic one — so `_validity_absence` is never consulted and **the validity
+   gate is still unexercised end to end**. `Operator.acoustic_speaker_id` is the
+   hook: bind operators to real LibriSpeech speakers, embed, register
+   `AcousticStreamComparator`. Heavy, because it needs the corpus and a model.
 
 5. **Corpus expansion.** 510 usable speakers came from a fetch stopped at 41%.
    Completing `train-clean-360` reaches ~761; `train-other-500` adds ~1,100.
-   Bandwidth-bound, not compute-bound.
+   Bandwidth-bound, not compute-bound. Note §22 weakens the *urgency*: the
+   binding constraint was the extractor's speaker count and that has been
+   bought rather than collected. More speakers now buy back-end quality only.
 
-6. **What produces the ψ₁ spike**, now that the confound is refuted. §21 lists
-   three candidates: LibriSpeech session effects, length normalisation, and
-   upward bias in a leading eigenvalue estimated from 306 speakers. The last is
-   partly argued against already — the 125-speaker model shows a *smaller*
-   ratio, the wrong direction for an estimation artefact.
+6. **Place the system on `forensic_eval_01`.** §12's benchmark is an inference
+   across datasets until this is run, and §22 makes the gap worth measuring
+   properly rather than narrating.
 
 ### Blocked on the user
 
@@ -300,6 +332,21 @@ Loosening a tolerance to absorb it would have hidden the next real defect.
 
 **Measure, do not estimate**, quantities the argument rests on. The CMVN window
 shares were assumed 8%/85% and are 11%/67%.
+
+**Round from the artefact, not from the terminal — and check it with a script.**
+Two figures in §22's calibration table were wrong in the third decimal because
+they were rounded off a four-decimal progress line instead of the JSON: 0.0625
+printed became 0.063 where the stored 0.06247 rounds to 0.062. Both were caught
+by re-parsing the committed markdown table and comparing every cell against the
+artefact, which takes a few lines and should be done for any table this document
+gains:
+
+```bash
+python -c "import json,re; doc=open('docs/H1-acoustic-results.md',encoding='utf-8').read(); ..."
+```
+
+The rule "read the numbers back from the artefact" is not satisfied by having
+*seen* the artefact's numbers go past in a log. Parse the file.
 
 ---
 

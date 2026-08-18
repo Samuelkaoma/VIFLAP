@@ -2673,3 +2673,209 @@ paired evaluation over the 102 held-out speakers is what would settle it.
 it replaces whether or not ψ₁ moved, and the old behaviour is retained behind
 `--condition-allocation global` because every model in §§4–18 was trained under
 it.
+
+---
+
+## 22. A borrowed extractor, and the first supported cells in this document
+
+§12 ended with a specific instruction: **not "train an x-vector extractor" — borrow
+one**, because the gap against a published forensic system was produced by ~6,000
+VoxCeleb2 speakers behind its extractor, and 6,000 speakers is not collectable
+here. This section is that move, carried out and measured.
+
+| | |
+|---|---|
+| Extractor | ECAPA-TDNN, `speechbrain/spkrec-ecapa-voxceleb`, 192-dim |
+| Its training data | VoxCeleb2, ~6,000 speakers, none of it ours |
+| Back-end | length-norm → LDA/WCCN → two-covariance PLDA, **fitted here on 306 speakers** |
+| Corpus, split, channel, trial rule, bootstrap | unchanged from §9 |
+| Extraction cost | 330 minutes over 2,578 recordings |
+| Scoring cost | 16 minutes |
+
+Artefacts: `data/reports/neural_embeddings.npz`,
+`data/reports/neural_extraction.json`, `data/reports/h1_neural.json`.
+
+The i-vector column below is `data/reports/h1_pooled_ownership.json` — the §18
+symmetric-ownership recomputation, not §9's original table — because
+`score_neural.py` reuses `_different_source_owner` and `bootstrap_over_speakers`,
+so both columns carry §14's BCa correction and §18's attribution rule. Comparing
+against §9's percentile intervals would have credited the extractor with a change
+of method.
+
+### Result
+
+`C_llr_min` with BCa intervals at B = 2000, on the same 102 held-out speakers.
+
+| Condition | Dur. | i-vector (306 spk) | EER | ECAPA + same back-end | EER | H1 |
+|---|---:|---|---:|---|---:|:---:|
+| 12.2 kbit/s, clean | 30 s | 0.276 [0.212, 0.383] | 7.89% | **0.099 [0.031, 0.230]** | **2.47%** | **supported** |
+| 12.2 kbit/s, clean | 15 s | 0.349 [0.288, 0.448] | 9.81% | **0.126 [0.064, 0.253]** | **2.83%** | **supported** |
+| 12.2 kbit/s, clean | 5 s | 0.539 [0.479, 0.613] | 16.87% | 0.234 [0.176, 0.341] | 6.01% | inconclusive |
+| 12.2 kbit/s, babble 20 dB | 30 s | 0.295 [0.234, 0.400] | 9.15% | **0.114 [0.041, 0.249]** | **2.59%** | **supported** |
+| 12.2 kbit/s, babble 20 dB | 15 s | 0.370 [0.313, 0.466] | 10.95% | **0.156 [0.089, 0.280]** | **3.65%** | **supported** |
+| 12.2 kbit/s, babble 20 dB | 5 s | 0.514 [0.467, 0.601] | 15.96% | 0.291 [0.230, 0.398] | 7.42% | inconclusive |
+
+**Four cells reach `supported`.** Under the rule fixed in §3 — supported if the
+*upper* bound of `C_llr_min` ≤ 0.30 — these are the first supported cells
+anywhere in this document. §4 returned 0 supported of 28 evaluable cells; §9 moved
+the system from *falsified at five seconds* to *inconclusive everywhere* without
+reaching support; this reaches it in four of six.
+
+At the best cell `C_llr_min` falls 0.276 → 0.099, a 64% relative reduction, and
+EER 7.89% → 2.47%, a 69% relative reduction.
+
+Calibration is also cheaper, which is a separate finding from discrimination:
+
+| Condition | Dur. | i-vector matched `C_llr` | ECAPA matched `C_llr` | i-vector calib. loss | ECAPA calib. loss |
+|---|---:|---:|---:|---:|---:|
+| clean | 30 s | 0.336 | **0.138** | 0.060 | **0.039** |
+| clean | 15 s | 0.412 | **0.158** | 0.062 | **0.032** |
+| clean | 5 s | 0.582 | **0.266** | 0.043 | **0.032** |
+| babble 20 dB | 30 s | 0.362 | **0.151** | 0.067 | **0.036** |
+| babble 20 dB | 15 s | 0.430 | **0.193** | 0.059 | **0.037** |
+| babble 20 dB | 5 s | 0.551 | **0.319** | 0.037 | **0.028** |
+
+### §12's mechanism, confirmed one stage earlier
+
+§9 established that speaker count binds in the back-end: 125 → 306 speakers
+improved five of six cells. §12 argued the same mechanism operates in the
+extractor, on the evidence that E3FS3's ResNet saw ~6,000 speakers while only its
+LDA and PLDA saw 91.
+
+This experiment holds the back-end's speaker count fixed at 306 and changes only
+the extractor's, from 306 to ~6,000. Everything else — corpus, split, channel
+conditions, trial rule, bootstrap, PLDA implementation — is the same code on the
+same audio. **The improvement is therefore attributable to the extractor and to
+essentially nothing else in this system**, which is the cleanest form §12's
+prediction could have been tested in.
+
+It is worth being precise about what was imported, because the experiment does
+not separate two things. Not only training data: an i-vector extractor and an
+ECAPA-TDNN differ in architecture, in objective and in augmentation as well as in
+speaker count, and this design cannot apportion the gain between them. What it
+does show is that the *reachable* move — buying 6,000 speakers with a checkpoint
+download rather than a collection programme — delivers, and delivers more than any
+change made to this system so far.
+
+### What this does not establish
+
+**The comparison is not paired, and the direction is not established at a stated
+confidence.** §7 and §9 bootstrapped the *paired* difference over speakers,
+because reading marginal overlap as "no difference" manufactures a null. The same
+warning runs the other way: these marginal intervals do overlap slightly — clean
+30 s is [0.212, 0.383] against [0.031, 0.230] — and non-overlap was never the
+test. A paired test **is** available in principle for the four 30 s and 15 s
+cells, where the two systems scored an identical trial set (849 same-source and
+132,796 different-source in both), and it was not run only because neither
+`evaluate_h1.py` nor `score_neural.py` persists per-trial scores. That is a
+missing run, not a missing possibility, and it is the first thing to do next.
+
+**The five-second rows are not on the same trials.** The i-vector front-end
+refused 12 recordings at 5 s clean and 73 at 5 s babble; ECAPA refused none. So
+the i-vector figures there rest on 814/126,705 and 639/97,956 trials against
+ECAPA's 849/132,796. §6 records that refusals at short duration are *not* random
+with respect to difficulty — they remove the recordings carrying least speech,
+which are the hardest — so the i-vector column at 5 s is scored on an easier
+subset and the gap in those two rows is, if anything, understated.
+
+**Zero refusals is not straightforwardly a virtue.** The i-vector system refuses
+when the posterior is dominated by the prior, which is a designed statement that
+the recording cannot support a comparison. ECAPA has no such notion and returns a
+192-dimensional vector for any input, so the neural system has **no operating
+point at which it says it cannot tell**. Here that confidence happens to be
+earned — it scores better at 5 s while declining to abstain — but a forensic
+deployment needs the abstention, and adopting this extractor means building one
+rather than inheriting it.
+
+**We did not control the extractor's training data.** The 102 evaluation speakers
+are LibriVox volunteers and VoxCeleb2 is YouTube celebrity interview audio, so
+overlap is implausible; but implausible is not verified, and it cannot be verified
+here, because the checkpoint's training list is not ours. Every borrowed-extractor
+result carries this caveat and so does this one.
+
+**The channel is still the parametric model** validated in §20, not a real AMR-NB
+coder, and §20 found the two distortions near-independent rather than one a
+harsher version of the other. Nothing here changes that caveat's scope.
+
+**Against published work, one comparison is available and one is not.** ECAPA's
+matched `C_llr` of 0.138 at 12.2 kbit/s clean 30 s sits in the range of E3FS3's
+case-specific conditions (0.085–0.097 at 30 s). §12 explicitly identified that
+comparison as a selection effect — best cell against best case-specific condition
+— and the correction it made should not now be quietly undone. The like-for-like
+figure is `forensic_eval_01`, on which E3FS3α reaches 0.208 and **this system has
+never been run at all**. The honest statement is that the gap §12 measured at a
+factor of 1.6 has plainly narrowed, and that quantifying it requires running that
+benchmark rather than reasoning across datasets.
+
+### Back-end health, and a note on dimension
+
+| | |
+|---|---:|
+| Transform dimension reaching PLDA | 192 |
+| PLDA iterations to convergence | 35 |
+| Converged | yes |
+| ψ₁ | 66.98 |
+
+LDA did not truncate: 192 is below the 305-dimension ceiling that 306 training
+speakers impose, so `min(192, 305) = 192` and the embedding passes through whole.
+That is a thinner estimate per dimension than the i-vector system's 100 from the
+same 1,539 training recordings, and §19's convergence monitor raised nothing — but
+"it converged" is not "it was well-determined", and a control at
+`--lda-dimension 100` is reported below.
+
+ψ₁ is 66.98. §1's ψ₁/ψ₂ *ratio* is the comparable quantity rather than ψ₁ itself
+and is not computed here, so whether §21's ψ₁ spike survives a change of extractor
+is a live question this run does not answer. It is now cheap to answer, since the
+embeddings are on disk.
+
+### Control: the result is not an artefact of the 192-dimensional transform
+
+Rerun with `--lda-dimension 100`, forcing the transform to the same width the
+i-vector system uses. Artefact: `data/reports/h1_neural_lda100.json`. Extraction
+is a separate script, so this cost 16 minutes rather than another six hours —
+which is the whole reason the two were split.
+
+| Condition | Dur. | 192-dim | 100-dim | Δ | Verdict |
+|---|---:|---:|---:|---:|:---:|
+| clean | 30 s | 0.099 | 0.103 | +0.004 | supported, both |
+| clean | 15 s | 0.126 | 0.135 | +0.009 | supported, both |
+| clean | 5 s | 0.234 | 0.248 | +0.013 | inconclusive, both |
+| babble 20 dB | 30 s | 0.114 | 0.118 | +0.003 | supported, both |
+| babble 20 dB | 15 s | 0.156 | 0.165 | +0.009 | supported, both |
+| babble 20 dB | 5 s | 0.291 | 0.304 | +0.013 | inconclusive, both |
+
+**Every verdict is unchanged and four cells remain supported.** Truncating to 100
+dimensions costs between 0.003 and 0.013 — real, consistently in one direction,
+and an order of magnitude smaller than the 0.177 the extractor change bought at
+the best cell. The cost grows as the cell gets harder, which is what discarding
+genuine information looks like.
+
+Two incidental readings, both worth having:
+
+**The 192-dimensional fit was not unstable.** PLDA converged in 35 iterations at
+192 dimensions and 6 at 100. A longer EM run is not an ill-conditioned one, and
+§19's monitor — which asserts monotonicity of the exact observed-data
+log-likelihood and raises on violation — stayed quiet in both. The concern that
+prompted this control was reasonable and is answered.
+
+**More dimensions help here, where in §7 more capacity hurt.** That is not a
+contradiction. §7's larger model was truncated to 124 by a 125-speaker LDA
+ceiling while its UBM had half the data per component; here 192 sits comfortably
+below the 305-dimension ceiling that 306 speakers impose, nothing is truncated,
+and the extra 92 dimensions are estimated from an extractor that never saw this
+corpus. The constraint §7 identified is a property of estimating a subspace from
+too few speakers, and borrowing the extractor is precisely what removes it.
+
+### What follows
+
+1. **Run the paired difference test** on the four cells with identical trial sets.
+   Both scripts need to persist per-trial scores first, which
+   `compare_calibrators.py` already does and for the same reason.
+2. **Rerun §21's ψ₁ question against these embeddings.** The extractor changed and
+   the corpus did not; if the spike is a LibriSpeech session effect it should
+   survive, and if it is an i-vector length-normalisation artefact it should not.
+3. **Place this system on `forensic_eval_01`**, which is the only way the §12
+   benchmark becomes a measurement rather than an inference.
+4. **The countermeasure is untouched by this.** §10's blindness to phase-only
+   attacks is a property of LFCC features, and a better speaker embedding does
+   nothing for a validity gate that cannot see the attack.
