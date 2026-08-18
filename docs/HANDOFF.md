@@ -294,15 +294,25 @@ re-deriving. Each is measured, and several are negative results.
    `score_neural` (16 min) and `compare_extractors` (25 min). The prize is
    pairable 5 s cells, not a change to the headline.
 
-2. **Give §11 a behavioural marginal that is not optimistic.** The acoustic half
-   is done — the simulation now also runs from §22's ECAPA marginal (+9.48 /
-   −6.51 over 102 speakers) and the ordering sharpened rather than reversing.
-   What is left is the *other* assumption: the behavioural stream is set at 0.75
-   of acoustic separation, and §13's operating point says it should be **worse
-   than acoustic, not 75% of it** — `C_llr` 0.54 at 500 tokens against the
-   acoustic 0.276, or 0.099 under §22. Nothing in the two runs so far says what
-   a properly weak behavioural stream does to the ordering, and that is now the
-   most interesting unknown in the section.
+2. **Make §11's behavioural stream genuinely weaker — with a mechanism that
+   works.** Attempting this found that the existing one does not.
+   `_ASSUMED_STRENGTH` scales log-LRs, which is **monotonic**: `C_llr_min` is
+   exactly unchanged at every setting, so all three simulated streams have
+   identical discrimination and only their *confidence* differs. Worse, that
+   reaches one arm only — the two fitted models refit and absorb it, so the
+   constant moves the naive sum alone, and at ρ = 0.6 scaling *down* makes the
+   naive sum **better** because under-confidence offsets double-counting.
+
+   §11 now records which claims survive (the latent-versus-linear comparison
+   does, because both arms are invariant; anything about the naive sum does
+   not). The constants are kept so the published figures stay reproducible.
+
+   What is left needs a different mechanism: draw the behavioural marginal from
+   a distribution with **more overlap**, so the stream is less discriminative
+   rather than the same discrimination expressed less confidently. §13's target
+   is `C_llr` 0.54 at 500 tokens against the acoustic 0.276, or 0.099 under §22.
+   On the evidence above this is the only version of the change that could move
+   the result.
 
 3. **Put audio on the synthetic pipeline.** `scripts/synthetic_pipeline.py`
    drives four streams end to end with the real comparators, but not the

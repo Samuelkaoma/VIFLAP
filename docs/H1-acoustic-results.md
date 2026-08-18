@@ -1473,6 +1473,90 @@ opening still governs: no figure here is a result, and the reason to run it on
 the ECAPA marginal was to find out whether the *ordering* was an artefact of a
 weak one. It was not.
 
+### The "weaker streams" were never weaker, and it reached one arm only
+
+> **A defect in this section's construction, found while trying to act on its own
+> caveat.** The remaining item was that the behavioural stream is set at 0.75 of
+> acoustic separation where §13's operating point says it should be worse than
+> acoustic. Attempting to lower the number established that the number does not
+> do what the section says it does.
+
+`_ASSUMED_STRENGTH` multiplies the unmeasured streams' log-LRs by 0.75 and 0.50,
+documented as making them "weaker than the measured one" and commented at the
+multiplication as reducing separation. **Multiplying log-LRs by a positive
+constant is monotonic.** The ranking of trials is untouched, so `C_llr_min` is
+exactly unchanged and discrimination is identical at every setting:
+
+| Scale | `C_llr` | `C_llr_min` |
+|---:|---:|---:|
+| 1.00 | 0.328 | **0.276** |
+| 0.75 | 0.354 | **0.276** |
+| 0.50 | 0.428 | **0.276** |
+| 0.10 | 0.807 | **0.276** |
+
+So all three simulated streams have **identical discriminability by
+construction**, which is a far stronger assumption than the one the section
+declared. What the constant actually varies is *confidence*: a scaled stream is
+under-confident, which is a calibration defect.
+
+**And a calibration defect reaches exactly one of the three arms.**
+`LinearLogisticFusion` fits `w₀ + Σ wᵢlᵢ`, and `lᵢ → sᵢlᵢ` is the same model at
+`wᵢ/sᵢ`, so refitting absorbs it. `GaussianLatentFusion` refits means and
+covariances, and the Jacobian of a diagonal rescaling cancels between the
+same-source and different-source densities. Only `NaiveIndependentFusion` adds
+the values as given and has nothing to refit. Measured at 1,200 incidents:
+
+| ρ | Strengths | naive sum | linear-logistic | Gaussian latent |
+|---:|---|---:|---:|---:|
+| 0.0 | 0.75 / 0.50 (as published) | 0.148 | **0.0766** | 0.105 |
+| 0.0 | 1.00 / 1.00 | 0.130 | **0.0766** | 0.105 |
+| 0.0 | 0.25 / 0.15 | 0.247 | **0.0766** | 0.104 |
+| 0.6 | 0.75 / 0.50 (as published) | 0.416 | **0.2747** | 0.389 |
+| 0.6 | 1.00 / 1.00 | 0.501 | **0.2747** | 0.389 |
+| 0.6 | 0.25 / 0.15 | 0.374 | **0.2747** | 0.385 |
+
+The linear column does not move at all — 0.0766 and 0.2747 to four decimals,
+across a fourfold change in the constants. The latent column moves in the third
+decimal, which is EM stopping rather than the property failing. The naive column
+moves by up to a factor of two.
+
+**Note the sign at ρ = 0.6.** Scaling the streams *down* makes the naive sum
+**better** — 0.374 against 0.501 — because under-confidence partly offsets the
+double-counting that dependence causes. The arbitrary constants were
+accidentally compensating for the very effect this section exists to measure.
+
+### What survives, and what does not
+
+**The central finding survives, and survives cleanly.** Every comparison between
+`gaussian_latent` and `linear_logistic` — the paired differences, all five
+excluding zero, on both copulas and both marginals — is between two arms that are
+*both* invariant to these constants. Nothing in that result depends on them, and
+the fact that it holds at 0.75/0.50 and at 1.00/1.00 and at 0.25/0.15 is a
+robustness check the section did not know it had run.
+
+**Every statement about the naive sum is contaminated.** That includes the
+framing this section led with — that what the first version called "the cost of
+assuming independence" was mostly "the cost of not fitting anything". Part of
+what it was measuring is the cost of being handed deliberately under-confident
+inputs, which is neither.
+
+**The comparison the section should have been making is between the two fitted
+arms**, and that one was sound all along. The naive sum belongs in the table as a
+floor, not as a baseline anything is measured against.
+
+### What this does not fix
+
+The constants are **kept**, not corrected, because every published figure above
+was produced with them and changing them silently would make the section
+unreproducible. The docstring and the comment now say what they do.
+
+**Making the behavioural stream genuinely weaker is still undone**, and it is now
+clear it needs a different mechanism: a stream with less discrimination, not a
+stream with the same discrimination expressed less confidently. Reducing the
+quantile-mapped separation — drawing that stream's marginal from a distribution
+with more overlap — would do it. Nothing here measures what that does, and on the
+evidence above it is the only version of the change that could move the result.
+
 ### What this still does not establish (original)
 
 > **Two items previously listed here have been addressed** and are struck rather

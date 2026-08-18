@@ -76,10 +76,28 @@ _STREAMS = (
     EvidenceStream.TEMPORAL,
 )
 
-#: Separation of the assumed marginals relative to the measured acoustic one.
-#: Below one because the acoustic stream is the only one with a measured
-#: discrimination figure, and assuming the unmeasured streams are stronger than
-#: the measured one would flatter every result that follows.
+#: Scale applied to the assumed marginals relative to the measured acoustic one.
+#:
+#: **This does not make a stream weaker, and the name and the original comment
+#: both said it did.** Multiplying a stream's log-LRs by a positive constant is
+#: monotonic: the ranking of trials is untouched, so ``C_llr_min`` is exactly
+#: unchanged and every stream here has *identical* discrimination whatever this
+#: says. What moves is ``C_llr`` — the stream becomes under-confident, which is a
+#: calibration defect rather than a quality one.
+#:
+#: The consequence is that this constant reaches exactly one of the three fusion
+#: arms. ``LinearLogisticFusion`` refits ``w_i`` and absorbs the scaling to
+#: optimiser tolerance; ``GaussianLatentFusion`` refits means and covariances and
+#: the Jacobian cancels between numerator and denominator. Only
+#: ``NaiveIndependentFusion`` adds the values as given and has nothing to refit,
+#: so it is the only arm that can feel this — and at high correlation the
+#: under-confidence partly offsets the double-counting, which *helps* it.
+#:
+#: Kept at these values rather than removed, because every published figure in
+#: §11 was produced with them and changing them silently would make the section
+#: unreproducible. §11 records which of its claims survive: the latent-versus-
+#: linear comparison does, because both arms are invariant, and anything
+#: involving the naive sum does not.
 _ASSUMED_STRENGTH = {
     EvidenceStream.BEHAVIOURAL: 0.75,
     EvidenceStream.TEMPORAL: 0.50,
@@ -243,9 +261,9 @@ def simulate(
         column = positions[:, index]
         values[truth, index] = _from_positions(column[truth], same_source)
         values[~truth, index] = _from_positions(column[~truth], different_source)
-        # The unmeasured streams are weaker than the measured one. Shrinking
-        # towards zero reduces separation without changing the distribution
-        # family, so the comparison across streams stays like-for-like.
+        # Scales the stream's confidence, NOT its discrimination — this is a
+        # monotonic map and leaves C_llr_min exactly unchanged. See
+        # ``_ASSUMED_STRENGTH`` for what that means for each fusion arm.
         values[:, index] *= _ASSUMED_STRENGTH.get(_STREAMS[index], 1.0)
 
     return FusionTrainingSet(

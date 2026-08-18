@@ -213,3 +213,102 @@ class TestSummaries:
         summary = _summarise(0.0, per_replicate, [0.1], [0.2])
         assert set(summary["c_llr"]) == set(per_replicate)
         assert summary["correlation"] == 0.0
+
+
+class TestStreamStrengthIsNotStreamQuality:
+    """``_ASSUMED_STRENGTH`` does not do what §11 said it did.
+
+    The constant is documented as making the unmeasured streams *weaker* than
+    the measured one, and the comment at the multiplication says it "reduces
+    separation". It does not. Multiplying a stream's log-LRs by a positive
+    constant is monotonic, so the ranking of trials is untouched and
+    discrimination is exactly unchanged; what moves is calibration, and the
+    streams become under-confident rather than less informative.
+
+    That matters because the three fusion arms respond to it completely
+    differently, and only one of them is affected at all. These tests pin the
+    property so the constant cannot quietly be read as a quality knob again.
+    """
+
+    def test_scaling_leaves_discrimination_exactly_unchanged(self) -> None:
+        """The claim in one line: same ``C_llr_min``, different ``C_llr``."""
+        from viflap.analysis.calibration.metrics import compute_cllr, compute_cllr_min
+
+        rng = np.random.default_rng(0)
+        scores = np.concatenate(
+            [rng.normal(2.2, 2.1, 2000), rng.normal(-3.9, 2.3, 20000)]
+        )
+        labels = np.concatenate([np.ones(2000), np.zeros(20000)]).astype(np.int64)
+
+        baseline_min = compute_cllr_min(scores, labels)
+        baseline_cllr = compute_cllr(scores, labels)
+        for strength in (0.75, 0.5, 0.1):
+            scaled = scores * strength
+            assert compute_cllr_min(scaled, labels) == pytest.approx(baseline_min)
+            assert compute_cllr(scaled, labels) != pytest.approx(baseline_cllr)
+
+    def test_a_fitted_linear_fusion_absorbs_the_scaling_exactly(
+        self, marginal
+    ) -> None:
+        """``w0 + sum wi*li`` under ``li -> si*li`` is the same model at
+        ``wi/si``, so refitting recovers it and the constant cannot reach the
+        result.
+
+        Exact in the algebra, and equal to about 5e-6 in practice — the residual
+        is where the optimiser stopped, not the property failing. The tolerance
+        below is still two orders of magnitude tighter than the movement the
+        naive sum shows on the same inputs, which is the comparison that matters.
+        """
+        from viflap.analysis.fusion.models import LinearLogisticFusion
+
+        same, different = marginal
+        values = [
+            self._arm(LinearLogisticFusion, same, different, strength)
+            for strength in (1.0, 0.75, 0.25)
+        ]
+        assert values[0] == pytest.approx(values[1], abs=1e-4)
+        assert values[0] == pytest.approx(values[2], abs=1e-4)
+
+    def test_only_the_naive_sum_can_feel_it(self, marginal) -> None:
+        """The one arm with nothing to refit.
+
+        ``NaiveIndependentFusion`` adds the log-LRs as given, so it is the only
+        arm that has to take a rescaled input at face value. Any §11 statement
+        about the naive sum is therefore partly a statement about an arbitrary
+        constant, and that is exactly what the section had to withdraw.
+        """
+        from viflap.analysis.fusion.models import NaiveIndependentFusion
+
+        same, different = marginal
+        costs = [
+            self._arm(NaiveIndependentFusion, same, different, strength)
+            for strength in (1.0, 0.25)
+        ]
+        assert costs[0] != pytest.approx(costs[1], abs=1e-3)
+
+    @staticmethod
+    def _arm(model_class, same, different, strength: float) -> float:
+        import scripts.measure_overstatement as mo
+        from viflap.domain.evidence import EvidenceStream
+
+        original = dict(mo._ASSUMED_STRENGTH)
+        mo._ASSUMED_STRENGTH.clear()
+        mo._ASSUMED_STRENGTH.update(
+            {
+                EvidenceStream.BEHAVIOURAL: strength,
+                EvidenceStream.TEMPORAL: strength,
+            }
+        )
+        try:
+            training = mo.simulate(
+                same, different, 0.4, 1200, np.random.default_rng(3)
+            )
+            evaluation = mo.simulate(
+                same, different, 0.4, 1200, np.random.default_rng(4)
+            )
+            model = model_class()
+            fitted = model.fit(training) if hasattr(model, "fit") else model
+            return mo._fused_cllr(fitted, evaluation)
+        finally:
+            mo._ASSUMED_STRENGTH.clear()
+            mo._ASSUMED_STRENGTH.update(original)
