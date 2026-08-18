@@ -22,7 +22,7 @@ git -C . log --oneline -20
 python -m pytest -q -p no:randomly
 ```
 
-Then read `docs/H1-acoustic-results.md` (~3,100 lines, §§1–23). It is the
+Then read `docs/H1-acoustic-results.md` (~3,350 lines, §§1–23). It is the
 system of record. Every claim in it is either measured or marked withdrawn in
 place; nothing is deleted.
 
@@ -45,7 +45,7 @@ powershell -Command "Get-CimInstance Win32_Process -Filter 'Name=\"python.exe\"'
 
 | | |
 |---|---|
-| Tests | **750, all passing** |
+| Tests | **767, all passing** (~7 min) |
 | ruff | clean (`viflap scripts tests`) |
 | mypy | **63 errors on `viflap`** — pre-existing baseline, not a regression |
 | Git | clean, all pushed, `main` |
@@ -83,16 +83,26 @@ pretrained/spkrec-ecapa-voxceleb/   ECAPA-TDNN, 89 MB, 192-dim  §22
 Embeddings and reports, all under the gitignored `data/reports/`:
 
 ```
-neural_embeddings.npz     ECAPA over the whole corpus, 6.5 MB   §22
-neural_extraction.json    13 cells, 0 refusals anywhere         §22
-h1_neural.json            the §22 result table
-h1_neural_lda100.json     the §22 dimension control
-h1_pooled_ownership.json  the i-vector baseline §22 compares to
-h1_extractor_paired.json  §22's paired difference, 6/6 surviving Holm
-overstatement.json        §11, 40 replicates, Gaussian copula
-overstatement_tcopula.json §11, 40 replicates, Student-t copula
-psi_spectrum.json         §23, the ψ₁ candidates and the speaker sweep
+neural_embeddings.npz      ECAPA over the whole corpus, 6.5 MB  §22
+neural_extraction.json     13 cells, 0 refusals — PRE-GATE-FIX  §22
+h1_neural.json             the §22 result table
+h1_neural_lda100.json      the §22 dimension control
+h1_pooled_ownership.json   the i-vector baseline §22 compares to
+h1_pooled_scores.npz       i-vector per-trial scores (~43 min)
+h1_neural_scores.npz       ECAPA per-trial scores (~16 min)
+h1_extractor_paired.json   §22's paired difference, 6/6 surviving Holm
+overstatement.json         §11, 40 replicates, Gaussian, 42-spk marginal
+overstatement_tcopula.json §11, same, Student-t copula
+overstatement_ecapa.json   §11 on §22's marginal — the strong-marginal arm
+overstatement_ecapa_tcopula.json  §11, same, Student-t
+psi_spectrum.json          §23, the ψ₁ candidates and the speaker sweep
+afrispeech_survey.json     §8, zero Zambian speakers
 ```
+
+`neural_extraction.json` records zero refusals everywhere, and that is a
+property of the **old** wall-clock gate, not of the corpus — see §5 item 1.
+`h1_neural_rescored.json` and `h1_pooled_rescored.json` are byproducts of
+generating the score archives and are **not** what any section quotes.
 
 **Current best is now the borrowed ECAPA extractor with the same 306-speaker
 back-end: `C_llr_min` 0.099 [0.031, 0.230], EER 2.47% at 12.2 kbit/s clean, 30 s,
@@ -110,9 +120,18 @@ the like-for-like i-vector column.
 
 ## 3. Running now
 
-**Nothing.** The paired comparison landed: six of six cells exclude zero and
-survive Holm, and §22 carries it with every row read back off
-`h1_extractor_paired.json`.
+**`python -m scripts.extract_neural --output data/reports/neural_embeddings_vad.npz
+--report data/reports/neural_extraction_vad.json`** — re-extraction under the
+corrected speech gate, §5 item 1. Started at the head of this file's last
+commit; **5.5 hours**. Log: `<scratchpad>/extract_vad.log`.
+
+It writes to **new paths on purpose**. `neural_embeddings.npz` is what §22
+quotes and must stay readable; nothing in this run may overwrite it.
+
+If it is gone and the archive exists, carry on with item 1's next steps. If it
+is gone and the archive does not, just relaunch — the command above is
+idempotent and writes only at the end. **Check before starting anything heavy**;
+it holds 7 workers.
 
 Per-trial score archives are on disk and are the expensive part —
 **do not regenerate them** unless the trials themselves change:
@@ -182,6 +201,11 @@ re-deriving. Each is measured, and several are negative results.
   transform. Read the two 5 s rows separately — they are paired on the
   intersection, which is the i-vector front-end's survivor subset and is
   measurably easier, so those two differences are understated.
+- **§8 (AfriSpeech-200)** Surveyed and closed. 67,365 utterances from 2,463
+  speakers, and **zero from Zambia** — not few, none. Bemba, Nyanja, Tonga and
+  Lozi absent entirely; Chichewa has one speaker, nine minutes, and he is
+  Malawian. It was never gated, which is the other half of the finding: the
+  question sat open because nobody asked it, not because anything blocked it.
 - **§13 (behavioural length)** `MIN_WORDS_IDIOLECT = 500` from Ishihara (2017)
   on predatory chatlog messages; `MIN_WORDS_SCRIPT` stays at 40 and is marked as
   having no citation, because it has none. Two floors, not one — the published
@@ -201,6 +225,13 @@ re-deriving. Each is measured, and several are negative results.
   way and why tracking ψ₁ alone would have given the opposite conclusion.
   LibriVox per-reader recording environment is the only survivor, and it implies
   §9's and §22's absolute figures are optimistic against real telephony.
+- **§22 (speech gate)** `NeuralEmbeddingConfig.min_speech_seconds` compared
+  wall-clock length against a threshold named for speech, where the i-vector
+  front-end runs VAD. Same name, same default, different quantity — and it is
+  why §22's 5 s cells could not be paired. Fixed, with tests that fail on the
+  old behaviour. §22's reported refusal counts predate the fix and say so; a
+  probe puts the correction at 0% for 30 s and 15 s, so **the four supported
+  cells and the four paired differences are untouched**.
 - **§11** Now 40 replicates per level with the acoustic marginal resampled over
   speakers, plus a Student-t copula arm for misspecification. Two findings. The
   marginal intervals are **enormous** — the naive sum spans [0.032, 0.316] at
@@ -212,6 +243,15 @@ re-deriving. Each is measured, and several are negative results.
   narrowing it. Also fixed: the section described its marginal as "+1.98 /
   −12.44", the *unbounded* means it had already announced it stopped using; the
   bounded ones are +2.24 / −3.92 nats and no reported figure moved.
+
+  Re-run on §22's far stronger ECAPA marginal the ordering **sharpens by a
+  factor of four** (+0.132 to +0.437). And the naive sum stops being the
+  villain: it costs 0.008 against the calibrated model's 0.007 at ρ = 0, where
+  on the weak marginal it cost double. On a marginal representative of the
+  current system, calibration matters *less* than §11 originally said and
+  dependence modelling is actively harmful — so the defensible fusion for a
+  deployment built on §22 is the simplest one available. That inverts the
+  section's practical advice and is the reason the re-run was worth doing.
 - **§21** Condition stratification works as designed (speakers with a repeated
   condition 75.2% → 0%, per-speaker mean-bitrate SD 1.42 → 0.66 kbit/s) and
   **ψ₁ moved only 44.951 → 43.967**. The condition confound is **refuted** as
