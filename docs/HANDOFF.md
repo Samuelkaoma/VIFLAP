@@ -134,9 +134,35 @@ the like-for-like i-vector column.
 
 ## 3. Running now
 
-**Nothing.** §24's gate is fixed and working: 71 of 80 admitted, up from 0.
-`models/countermeasure_union.npz` is the detector to use — the clean-trained and
-pooled-floor models are kept only because §24 quotes the before-and-after.
+**`python -m scripts.fetch_corpus --url
+https://www.openslr.org/resources/12/train-clean-360.tar.gz --destination
+data/corpus/librispeech-360-full --max-attempts 40`** — the complete
+`train-clean-360`, 921 speakers against the 380 the partial fetch left. Log:
+`<scratchpad>/fetch_360_full.log`.
+
+**It writes to a NEW root deliberately.** `scan_corpora` derives the
+306/102/102 split *from the corpus*, so adding speakers to
+`data/corpus/librispeech-360` would silently change every split and invalidate
+the comparability of §§9, 22 and 23 against anything computed afterwards. The
+new root is a **superset** of the old one: use `librispeech` +
+`librispeech-360-full` *instead of* `librispeech` + `librispeech-360`, never
+alongside — the speaker identifiers overlap and `scan_corpora` will refuse the
+merge.
+
+Nothing existing changes until someone re-runs an evaluation against the new
+root, and **§§9, 22 and 23 keep quoting the old one**.
+
+If it died, just relaunch: the fetch streams and writes per file, so a partial
+run leaves usable speakers and a rerun re-streams from the start (gzip cannot
+resume across runs). Check `ls data/corpus/librispeech-360-full | wc -l`
+against 921.
+
+When it lands, the corpus is *available*, not *used*. Retraining on ~761 usable
+speakers is a separate decision — and note §22 weakened the case: the binding
+constraint was the extractor's speaker count and that was bought with a
+checkpoint, so more speakers now buy back-end quality only, which §9 measured
+at −0.104 for 181 extra speakers against the −0.176 borrowing the extractor
+delivered.
 
 The corrected-gate loop, for reference: re-extraction (365 min), scoring
 (16 min) and pairing (25 min) all done, and §22 now reports the VAD-gated run
@@ -423,7 +449,7 @@ for no reason.
 | `huggingface.co`, `download.pytorch.org` | **works** |
 | `www.kaggle.com`, `kaggle.com/api/v1` | **works** |
 | `pypi.org`, `files.pythonhosted.org` | works |
-| `openslr.org` | works, ~5.4 Mbit/s, intermittent |
+| `openslr.org` | works, **~30 Mbit/s measured** (the ~5.4 Mbit/s in earlier notes was a bad day), intermittent |
 | **`api.github.com`** | **blocked** — the only one that has stayed blocked |
 
 Because `api.github.com` is blocked there is no `gh`, no workflow dispatch and
