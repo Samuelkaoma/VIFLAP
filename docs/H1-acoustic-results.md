@@ -3646,6 +3646,93 @@ acoustic stream.
    at chance. Multi-condition training fixes a channel mismatch; it does not
    give a magnitude feature access to phase.
 
+### The fix works on the axis it targeted, and uncovers the next one
+
+`train_countermeasure.py --degrade` retrains through the same eight conditions
+the acoustic stack uses. Artefacts: `models/countermeasure_multicondition.npz`,
+`data/reports/countermeasure_multicondition.json`,
+`data/reports/synthetic_acoustic_multicondition.json`.
+
+| On the same 80 recordings | Clean-trained | **Multi-condition** |
+|---|---:|---:|
+| Countermeasure log-LR, median | −0.21 | **+5.63** |
+| Range | −2.33 to +1.60 | **+3.70 to +7.18** |
+| **Reaching the +2.3 threshold** | **0 of 80** | **80 of 80** |
+| Admitted | 0 | **3** |
+
+**The channel mismatch is fixed and the diagnosis is confirmed.** Every one of
+the eighty recordings now clears the score threshold, where none did before. The
+median moves by 5.84. Nothing about the policy or the detector's architecture
+changed; only the audio it was trained on.
+
+**And the gate still admits only three of eighty**, because a second condition
+was being masked by the first. With scores no longer failing, the *domain* check
+takes over:
+
+| | Clean-trained | Multi-condition | Policy |
+|---|---:|---:|---:|
+| Out-of-domain fraction, median | 0.011 | **0.355** | > 0.25 rejects |
+| Recordings failing it | 0 of 40 | **38 of 40** | |
+| Dispersion ratio, median | 0.236 | 1.000 | > 2.5 rejects |
+
+The mechanism is in how the floor is calibrated. `out_of_domain_threshold` is the
+**1st percentile of best-of-both frame likelihoods over the training set**, so by
+construction about one percent of *training* frames fall below it. That is a
+sound definition when training and deployment see the same distribution. Trained
+across eight conditions, the pooled likelihood distribution is far broader than
+any single condition's, and a recording from one condition — here
+`amr12.2_clean` — lands systematically in its lower tail. Thirty-five percent of
+its frames fall below a floor built to exclude one.
+
+So the domain rule now fires on exactly the audio the detector was retrained to
+handle. It is not wrong to fire: a frame below the floor genuinely is unlike the
+training average. The floor is measuring the wrong thing — the spread of the
+training mixture rather than the distance of this recording from it.
+
+### Where that leaves the gate
+
+Three of eighty admitted is not an operable system, and it is a different
+failure from the first. It is worth being precise about what improved:
+
+- **The detector now works through the channel.** That was the §24 finding and it
+  is fixed.
+- **The gate is no longer refusing on strength of evidence.** All eighty
+  recordings are confidently genuine by the policy's own standard.
+- **The gate is refusing on domain**, and doing so because the floor's
+  calibration assumes a deployment distribution as broad as the training one.
+
+The next move is to calibrate the out-of-domain floor **per condition**, or on
+held-out material from the deployment condition, rather than on the pooled
+training set. That is a change to how the threshold is derived and not to the
+rule it feeds, and it is recorded in the handoff rather than attempted here.
+
+### What the retrained detector costs, and why that is not an argument against it
+
+| | Clean-trained | Multi-condition |
+|---|---:|---:|
+| Seen attacks, EER | **19.14%** | 25.00% |
+| Unseen `lpc_noise` | 13.54% | 18.03% |
+| Unseen `lpc_pulse` | 4.17% | 9.29% |
+| Unseen `oversmoothed` | 28.13% | 48.63% |
+| Unseen `phase_randomised` | 52.60% | 41.53% |
+
+**Every figure except one gets worse, and the model is still the right one.**
+Separating genuine speech from synthesis is harder through a coder than in clean
+audio: the coder discards exactly the fine spectral detail an LFCC detector keys
+on, and it does so for both classes. The clean-trained model's 19.14% is not a
+better system, it is the same task made easier by evaluating on material the
+deployment will never present. §24's whole point is that the flattering number
+was measured on the wrong audio.
+
+`phase_randomised` moving 52.60% → 41.53% should be read with suspicion rather
+than pleasure. §10 established that LFCCs are magnitude-only and therefore
+*structurally* blind to a phase-only attack, and nothing about multi-condition
+training changes that. A shift of this size on a single held-out family, from a
+figure that was at chance, is most likely the coder incidentally disturbing the
+randomised phase in a way the magnitude spectrum registers — an artefact of the
+channel, not detection of the attack. It is reported because it moved, and
+flagged because the mechanism §10 identified has not gone away.
+
 ### What this does not establish
 
 **One channel condition, one policy, one detector.** The clean 12.2 kbit/s cell
