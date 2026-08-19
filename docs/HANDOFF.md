@@ -45,7 +45,7 @@ powershell -Command "Get-CimInstance Win32_Process -Filter 'Name=\"python.exe\"'
 
 | | |
 |---|---|
-| Tests | **787, all passing** (~3 min) |
+| Tests | **791, all passing** (~3 min) |
 | ruff | clean (`viflap scripts tests`) |
 | mypy | **63 errors on `viflap`** — pre-existing baseline, not a regression |
 | Git | clean, all pushed, `main` |
@@ -77,7 +77,8 @@ acoustic_pooled_cmvn100.npz     CMVN 100                        §17 control
 acoustic_pooled_global.npz      306 spk, global allocation      §21 control
 acoustic_pooled_stratified.npz  306 spk, stratified allocation  §21
 countermeasure_english.npz      300 English spk, CLEAN-trained  §10, §24
-countermeasure_multicondition.npz  300 spk, 8 channel conditions §24 — the fix
+countermeasure_multicondition.npz  8 conditions, pooled floor  §24 — step 1
+countermeasure_union.npz        8 conditions, union floor     §24 — THE ONE TO USE
 pretrained/spkrec-ecapa-voxceleb/   ECAPA-TDNN, 89 MB, 192-dim  §22
 ```
 
@@ -103,7 +104,9 @@ overstatement_weak_behavioural.json  §11, behavioural at §13's operating point
 overstatement_weak_behavioural_tcopula.json  §11, same, Student-t
 psi_spectrum.json          §23, the ψ₁ candidates and the speaker sweep
 synthetic_acoustic.json    §24, clean-trained: 0 of 80 admitted
-synthetic_acoustic_multicondition.json  §24, the fix: 80/80 reach the bar, 3 admitted
+synthetic_acoustic_multicondition.json  §24, 80/80 reach the bar, 3 admitted
+synthetic_acoustic_union.json  §24, 71 of 80 admitted — the gate working
+countermeasure_union.json  §24, the final detector's EERs
 countermeasure_multicondition.json  §24, the retrained detector's EERs
 afrispeech_survey.json     §8, zero Zambian speakers
 ```
@@ -131,7 +134,9 @@ the like-for-like i-vector column.
 
 ## 3. Running now
 
-**Nothing.** The countermeasure retraining landed and §24 carries its result.
+**Nothing.** §24's gate is fixed and working: 71 of 80 admitted, up from 0.
+`models/countermeasure_union.npz` is the detector to use — the clean-trained and
+pooled-floor models are kept only because §24 quotes the before-and-after.
 
 The corrected-gate loop, for reference: re-extraction (365 min), scoring
 (16 min) and pairing (25 min) all done, and §22 now reports the VAD-gated run
@@ -234,16 +239,20 @@ re-deriving. Each is measured, and several are negative results.
   idiolect half. Below the floor the idiolect term is **withheld**, and that
   required a guard: with idiolect pinned at zero the delegation flag fires on
   anything with script evidence, including a transcript compared with itself.
-- **§24** **The validity gate: a channel mismatch, fixed, revealing a second
-  blocker.** Reached end to end for the first time by binding synthetic
-  operators to real held-out LibriSpeech speakers. The clean-trained detector
-  admitted **0 of 80** genuine recordings — *not* the out-of-domain rule, which
-  passed by an order of magnitude, but the score threshold: the same recordings
-  score a median log-LR of +2.76 clean and −0.23 through the coder. §1's
-  multi-condition rule had never been applied to the countermeasure. Retrained
-  with `--degrade`, **all 80 now clear the +2.3 bar** (median +5.63) — and only
-  3 are admitted, because the domain check was masked and now fires (0.355
-  against a 0.25 limit). See §5 item 1 for the floor's calibration defect.
+- **§24** **The validity gate: two defects, both fixed, and it now works.**
+  Reached end to end for the first time by binding synthetic operators to real
+  held-out LibriSpeech speakers. It admitted **0 of 80** genuine recordings.
+  Cause one: the countermeasure was trained on clean audio and deployed on coded
+  audio — §1's multi-condition rule, never applied here. The same recordings
+  score a median log-LR of +2.76 clean and −0.23 through the coder. Retrained
+  with `--degrade`, all 80 clear the +2.3 bar. Cause two, previously masked: the
+  out-of-domain floor was the 1st percentile over the *pooled* mixture, so it
+  fired hardest on the cleanest conditions (0.352) and barely on the noisiest
+  (0.042) — clean speech is atypical of a blend dominated by noise. "Unlike
+  anything in training" is a **union**; the floor is now the minimum over
+  per-condition percentiles. Result: **71 of 80 admitted, 9 indeterminate, 0
+  wrongly excluded.** `GatePolicy`'s ±2.3 band was never touched — widening it
+  at either stage would have hidden a real defect.
 - **§23** **The ψ₁ spike is corpus structure, by elimination.** It survives a
   complete change of extractor (ECAPA ratio 5.244, inside the i-vector range of
   5.13–7.04), so it is not the i-vector representation. Switching length
@@ -322,34 +331,7 @@ re-deriving. Each is measured, and several are negative results.
 
 ## 5. Open work, in priority order
 
-1. **Calibrate the out-of-domain floor per condition.** §24's channel mismatch
-   is fixed — multi-condition training moves the countermeasure's median log-LR
-   on deployed audio from −0.21 to **+5.63**, and all 80 recordings now clear the
-   +2.3 threshold where none did. But the gate still admits only **3 of 80**,
-   because the domain check was masked by the score failure and now fires:
-   out-of-domain fraction median 0.355 against a 0.25 limit, 38 of 40 failing.
-
-   The mechanism is in `CountermeasureConfig.out_of_domain_percentile`. The floor
-   is the **1st percentile of best-of-both frame likelihoods over the training
-   set**, which is sound when training and deployment share a distribution.
-   Trained across eight conditions the pooled distribution is far broader than
-   any single one, so a recording from one condition lands in its lower tail and
-   35% of its frames fall below a floor built to exclude 1%.
-
-   Calibrate the floor **per condition**, or on held-out material from the
-   deployment condition, rather than on the pooled training set. That changes how
-   the threshold is derived, not the rule it feeds. Do **not** widen
-   `max_out_of_domain_fraction` to accommodate it — that is the same mistake as
-   lowering the admit threshold would have been.
-
-   Do not read the retrained detector's worse EERs (25.00% seen against 19.14%)
-   as a reason to prefer the clean-trained model: separating speech from
-   synthesis is genuinely harder through a coder, and the clean model's better
-   figure is measured on audio the deployment never presents. `phase_randomised`
-   moving 52.60% → 41.53% should be treated as a channel artefact until shown
-   otherwise — §10's magnitude-only blindness is structural.
-
-2. **Corpus expansion — costed this session, and deliberately not started.**
+1. **Corpus expansion — costed, and deliberately not started.**
    510 usable speakers came from a fetch stopped at 41%. Completing
    `train-clean-360` reaches ~761; `train-other-500` adds ~1,100. Three things
    were checked before deciding:
@@ -379,7 +361,7 @@ re-deriving. Each is measured, and several are negative results.
    the extractor delivered. Worth doing eventually; not worth doing before the
    items above it.
 
-3. ~~**Build an abstention mechanism for the neural extractor.**~~ **Largely
+2. ~~**Build an abstention mechanism for the neural extractor.**~~ **Largely
    done, and it was a repair rather than a build.** The claim behind this item —
    that ECAPA "has no notion" of a recording too short to compare — was wrong.
    The gate existed; it measured wall-clock length under a name that promised

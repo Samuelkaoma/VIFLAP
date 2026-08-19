@@ -3511,7 +3511,7 @@ mechanism above is argued from how LibriVox is recorded, not measured.
 
 ---
 
-## 24. The validity gate, reached at last, admits nothing
+## 24. The validity gate, reached at last, and made to work
 
 Every test of the validity gate in this project has driven it through a
 hand-built `ValidityAssessment`. That is not an oversight of testing but a
@@ -3635,7 +3635,8 @@ acoustic stream.
    the coder rather than the synthesis. The result is in the next subsection.
 3. **Report the gate's operating point alongside any acoustic result.** §22's
    0.099 is what the acoustic stream achieves *when it is admitted*, and this
-   section measures how often that is.
+   section measures how often that is: **71 of 80** once both defects are fixed,
+   against none at the start.
 4. **The composition test belongs in the suite**, not in a script that has to be
    remembered. `tests/integration/test_synthetic_acoustic.py` asserts that the
    gate is reached at all — that a countermeasure verdict derived from a real
@@ -3705,6 +3706,92 @@ The next move is to calibrate the out-of-domain floor **per condition**, or on
 held-out material from the deployment condition, rather than on the pooled
 training set. That is a change to how the threshold is derived and not to the
 rule it feeds, and it is recorded in the handoff rather than attempted here.
+
+### The floor was measuring the wrong thing, and the gate now works
+
+Measuring the domain check per condition shows it running backwards:
+
+| Condition | Out-of-domain fraction | Countermeasure log-LR |
+|---|---:|---:|
+| `amr12.2_vehicle10dB` | **0.362** | +5.98 |
+| `amr12.2_clean` | **0.352** | +5.66 |
+| `amr7.4_clean` | 0.247 | +4.60 |
+| `amr4.75_vehicle15dB` | 0.238 | +3.58 |
+| `amr4.75_clean` | 0.233 | +4.16 |
+| `amr12.2_babble20dB` | 0.157 | +3.02 |
+| `amr5.9_babble15dB` | 0.066 | +1.62 |
+| `amr7.4_babble10dB` | 0.042 | +0.68 |
+
+**The fraction tracks the log-LR.** The recordings the detector is most confident
+are genuine are the ones it calls out of domain, and the cleanest conditions are
+flagged hardest while the noisiest pass almost entirely. That is the opposite of
+what a domain check is for.
+
+The cause is in how the floor was derived. `out_of_domain_threshold` was the 1st
+percentile of best-of-both frame likelihoods over the **pooled** training set —
+sound for a single-condition model, wrong for a mixture. Clean speech has
+peakier, less average features and therefore lower likelihood under a mixture
+dominated by noisy material, so it lands in the pooled lower tail *despite being
+exactly what the detector was trained on*. Thirty-five percent of its frames fall
+below a floor built to exclude one percent.
+
+**"Unlike anything in training" is a union, not a percentile of a blend.** A
+recording typical of one trained condition is in domain even if it is atypical of
+the average of all of them. The floor is now the minimum over per-condition
+percentiles, so every trained condition passes at roughly its own rate and only
+audio below all of them is flagged. Artefacts:
+`models/countermeasure_union.npz`, `data/reports/countermeasure_union.json`,
+`data/reports/synthetic_acoustic_union.json`.
+
+### The gate, across all three configurations
+
+| On the same 80 recordings | Clean-trained | Multi-condition, pooled floor | **Multi-condition, union floor** |
+|---|---:|---:|---:|
+| Countermeasure log-LR, median | −0.21 | +5.63 | **+5.63** |
+| Reaching the +2.3 threshold | 0 of 80 | 80 of 80 | **80 of 80** |
+| **Admitted** | **0** | **3** | **71** |
+| Indeterminate | 79 | 77 | **9** |
+| Excluded | 1 | 0 | **0** |
+
+**The validity gate is operable.** 71 of 80 genuine recordings admitted, nine
+held as indeterminate, none wrongly excluded — where the configuration this
+section opened with admitted none and excluded one.
+
+Two defects, found in order because the first masked the second, and neither
+visible to any test of a component alone:
+
+1. **A training-condition mismatch.** The detector was trained on clean audio and
+   deployed on coded audio, which §1 forbids for the acoustic stack and nobody
+   had applied to the countermeasure.
+2. **A floor calibrated against a mixture** rather than against each of the
+   conditions composing it, which only became visible once the first was fixed.
+
+Neither was a policy error. `GatePolicy`'s ±2.3 band is unchanged throughout, and
+the temptation to widen it at either stage would have hidden a real defect behind
+a threshold that admitted things it should not.
+
+**The nine remaining indeterminates are the check working.** They are recordings
+whose frames genuinely sit below every trained condition's floor, and holding
+them is what the rule is for. A gate admitting all eighty would be a gate that
+had stopped checking.
+
+### What this does not fix
+
+**The detector is no better at its job.** Every EER is unchanged from the
+previous subsection — 25.00% seen, 29.37% mean unseen — because the GMMs are
+identical and only the threshold derivation changed. The gate now passes
+recordings it was always confident about; it does not detect spoofs any better.
+
+**`phase_randomised` is still near chance** at 41.53%, and §10's mechanism is
+untouched: LFCCs are magnitude-only and no threshold fixes that.
+
+**The admission rate is measured on genuine speech only.** How often this gate
+*correctly excludes* a spoofed recording through the channel is a separate
+experiment, and the EERs above suggest the answer is "not reliably".
+
+**One channel condition at evaluation**, one policy, one detector, and a
+simulated corpus. What is established is that the composition works, not that it
+would work on Zambian casework.
 
 ### What the retrained detector costs, and why that is not an argument against it
 
