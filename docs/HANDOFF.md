@@ -134,42 +134,35 @@ the like-for-like i-vector column.
 
 ## 3. Running now
 
-**`python -m scripts.fetch_corpus --url
-https://openslr.elda.org/resources/12/train-clean-360.tar.gz --destination
-data/corpus/librispeech-360-full --max-attempts 200`** — the complete
-`train-clean-360`, 921 speakers against the 380 the partial fetch left. Log:
-`<scratchpad>/fetch_360_full2.log`.
+**`python -m scripts.train_acoustic --corpus data/corpus/librispeech --corpus
+data/corpus/librispeech-360-full --components 128 --rank 100 --output
+models/acoustic_expanded.npz --report data/reports/training_expanded.json`** —
+the i-vector system on the expanded corpus. ~35-60 min. Log:
+`<scratchpad>/train_562.log`.
 
-**Use the ELDA mirror, not `www.openslr.org`.** A first attempt from the
-canonical host reached 46% and then died: the connection dropped at byte
-10,609,776,640 and **all 40 reconnection attempts at that offset failed**.
-`openslr.elda.org` serves the same file, honours `Range` (verified with a 206 at
-that exact offset), and is running at 5.3 MB/s. `us.openslr.org` and
-`openslr.magicdatatech.com` did not respond at all.
+**The corpus expansion is done and it beat its projection.** The complete
+`train-clean-360` fetched cleanly from the ELDA mirror — 921 speakers, 20,226
+files, the full 23.05 GB streamed, empty stderr, manifest written.
 
-**It writes to a NEW root deliberately.** `scan_corpora` derives the
-306/102/102 split *from the corpus*, so adding speakers to
-`data/corpus/librispeech-360` would silently change every split and invalidate
-the comparability of §§9, 22 and 23 against anything computed afterwards. The
-new root is a **superset** of the old one: use `librispeech` +
-`librispeech-360-full` *instead of* `librispeech` + `librispeech-360`, never
-alongside — the speaker identifiers overlap and `scan_corpora` will refuse the
-merge.
+| | Usable speakers | Recordings | Split |
+|---|---:|---:|---|
+| Old (`librispeech` + `librispeech-360`) | 510 | 2,578 | 306 / 102 / 102 |
+| **New (`librispeech` + `librispeech-360-full`)** | **936** | **4,697** | **562 / 187 / 187** |
 
-Nothing existing changes until someone re-runs an evaluation against the new
-root, and **§§9, 22 and 23 keep quoting the old one**.
+1.84× the usable speakers, against the ~761 §5 projected. 194 of the 921 have a
+single session and cannot contribute within-speaker variation; `scan_corpora`
+warns about them and they are excluded from the 936.
 
-If it died, just relaunch: the fetch streams and writes per file, so a partial
-run leaves usable speakers and a rerun re-streams from the start (gzip cannot
-resume across runs). Check `ls data/corpus/librispeech-360-full | wc -l`
-against 921.
+**Use the new root INSTEAD of the old, never alongside** — the identifiers
+overlap and `scan_corpora` will refuse the merge. §§9, 22 and 23 keep quoting
+the old root and stay reproducible.
 
-When it lands, the corpus is *available*, not *used*. Retraining on ~761 usable
-speakers is a separate decision — and note §22 weakened the case: the binding
-constraint was the extractor's speaker count and that was bought with a
-checkpoint, so more speakers now buy back-end quality only, which §9 measured
-at −0.104 for 181 extra speakers against the −0.176 borrowing the extractor
-delivered.
+When the model lands, the comparison that means anything is **paired on speakers
+held out by both models**, exactly as §9 did — the two splits differ, so scoring
+each on its own evaluation set rewards whichever saw more of the other's. Use
+`compare_capacity.py --evaluation-speakers`. The live question is whether §9's
+speaker-count trend continues from 306 to 562, now that §22 has shown the
+extractor mattered more than the back-end.
 
 The corrected-gate loop, for reference: re-extraction (365 min), scoring
 (16 min) and pairing (25 min) all done, and §22 now reports the VAD-gated run
