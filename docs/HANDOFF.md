@@ -45,7 +45,7 @@ powershell -Command "Get-CimInstance Win32_Process -Filter 'Name=\"python.exe\"'
 
 | | |
 |---|---|
-| Tests | **791, all passing** (~3 min) |
+| Tests | **803, all passing** (~7 min) |
 | ruff | clean (`viflap scripts tests`) |
 | mypy | **63 errors on `viflap`** — pre-existing baseline, not a regression |
 | Git | clean, all pushed, `main` |
@@ -135,9 +135,24 @@ the like-for-like i-vector column.
 
 ## 3. Running now
 
-**Nothing.** The corpus expansion is complete and §25 carries its result: the
-i-vector system on 562 speakers reaches **four of six cells `supported`** on its
-own, without the borrowed extractor.
+**`python -m scripts.extract_neural --corpus data/corpus/librispeech --corpus
+data/corpus/librispeech-360-full --output data/reports/neural_embeddings_562.npz
+--report data/reports/neural_extraction_562.json`** — priority 1, the borrowed
+extractor over the expanded corpus. **~10 hours** (2,826 training recordings at
+30 s, then 935 development and 936 evaluation at two conditions × three
+durations). Log: `<scratchpad>/extract_562.log`. Writes only at the end and is
+idempotent, so relaunch if it died.
+
+Then `score_neural --embeddings data/reports/neural_embeddings_562.npz
+--extraction-report data/reports/neural_extraction_562.json` (16 min), which
+fits the back-end on **562** speakers. That is the combination neither §22 nor
+§25 ran: §22 changed the extractor with the back-end fixed at 306, §25 changed
+the back-end with the extractor fixed.
+
+**A caveat for the write-up.** This extraction predates the reserved evaluation
+set, so it uses the drawn split, not the pinned one. It is comparable to §25
+(same corpus, same seed, same split) but still not paired against §22. Passing
+`reserved_evaluation` everywhere is a separate pass and would need re-extraction.
 
 The corrected-gate loop, for reference: re-extraction (365 min), scoring
 (16 min) and pairing (25 min) all done, and §22 now reports the VAD-gated run
@@ -349,12 +364,14 @@ re-deriving. Each is measured, and several are negative results.
    corpus is on disk. Expect ~6 h of extraction over the larger corpus, then 16
    min to score.
 
-2. **Reserve a fixed evaluation set before any further corpus growth.** §25
-   could not be paired against §9 because only **19** speakers were held out by
-   both — the expanded model trained on most of the old model's evaluation set.
-   §9 hit the same problem at 35. Setting aside ~100 speakers now, excluded from
-   every training split forever, makes every future corpus-size comparison
-   paired. Doing it after the next expansion is too late, again.
+2. ~~**Reserve a fixed evaluation set before any further corpus growth.**~~
+   **Done.** `viflap/evaluation/reserved.py` names 100 speakers and
+   `split_by_speaker` takes `reserved_evaluation=`. Pass it on every future
+   training and evaluation run, or the guarantee is worthless. Common evaluation
+   speakers across this project's two corpora go 19 → 50; not 100 only because
+   the older 510-speaker corpus lacks half of them. **Any corpus that is a
+   superset of the current 936 shares all hundred.** Do not edit the list — the
+   module docstring explains why.
 
 3. **Sweep capacity at 562 speakers.** §7 found more capacity hurt at 125 and §9
    noted the LDA ceiling had moved to 305; at 562 it is 561, so rank 200 would

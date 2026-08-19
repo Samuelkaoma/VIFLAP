@@ -35,7 +35,7 @@ speaker cue, and one the codec and the SNR calculation would both then inherit.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Generic, Protocol, TypeVar
@@ -384,6 +384,7 @@ def split_by_speaker(
     development_fraction: float = 0.2,
     evaluation_fraction: float = 0.2,
     seed: int = 20250601,
+    reserved_evaluation: Collection[str] | None = None,
 ) -> CorpusSplit[ItemT]:
     """Partition recordings three ways with no speaker in more than one part.
 
@@ -395,26 +396,51 @@ def split_by_speaker(
     Accepts plans or loaded recordings alike: only ``speaker_id`` is consulted,
     and computing the split before reading any audio is what allows a run that
     needs two partitions to avoid loading the third.
+
+    ``reserved_evaluation`` pins named speakers to the evaluation partition
+    whatever else changes, and exists because the seeded permutation above makes
+    the split a function of *the whole speaker set*: adding speakers reshuffles
+    everyone, so a speaker held out at one corpus size is very likely training
+    material at the next. §25 measured what that costs — only 19 speakers were
+    held out by both the 306- and 562-speaker models, too few to compare them at
+    all. Reserved speakers are removed from the shuffle and added to evaluation,
+    and the remaining fractions are taken over what is left, so two corpora
+    sharing a reserved list share an evaluation set exactly.
+
+    Reserved identifiers absent from ``recordings`` are ignored rather than
+    raising: the list is a superset covering corpora this call may not hold, and
+    refusing would make it unusable on any subset.
+
+    See :mod:`viflap.evaluation.reserved` for the list this project uses and why
+    it must not be edited.
     """
     by_speaker: dict[str, list[ItemT]] = {}
     for recording in recordings:
         by_speaker.setdefault(recording.speaker_id, []).append(recording)
 
+    reserved = set(reserved_evaluation or ()) & set(by_speaker)
+
     rng = np.random.default_rng(seed)
-    speakers = sorted(by_speaker)
+    speakers = sorted(set(by_speaker) - reserved)
     order = rng.permutation(len(speakers))
     shuffled = [speakers[int(i)] for i in order]
 
-    n_total = len(shuffled)
-    n_eval = int(round(n_total * evaluation_fraction))
+    n_total = len(by_speaker)
+    # Fractions are of the whole corpus, so reserving speakers moves them from
+    # the drawn part of evaluation into the pinned part rather than adding to it.
+    n_eval = max(int(round(n_total * evaluation_fraction)) - len(reserved), 0)
     n_dev = int(round(n_total * development_fraction))
-    if n_eval < 3 or n_dev < 3 or n_total - n_eval - n_dev < 1:
+    if (
+        len(reserved) + n_eval < 3
+        or n_dev < 3
+        or len(shuffled) - n_eval - n_dev < 1
+    ):
         raise ValueError(
             f"corpus has too few speakers ({n_total}) to form a three-way "
             f"speaker-disjoint split with usable development and evaluation parts"
         )
 
-    eval_speakers = set(shuffled[:n_eval])
+    eval_speakers = reserved | set(shuffled[:n_eval])
     dev_speakers = set(shuffled[n_eval : n_eval + n_dev])
     train_speakers = set(shuffled[n_eval + n_dev :])
 
