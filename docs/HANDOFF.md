@@ -22,7 +22,7 @@ git -C . log --oneline -20
 python -m pytest -q -p no:randomly
 ```
 
-Then read `docs/H1-acoustic-results.md` (~3,630 lines, §§1–24). It is the
+Then read `docs/H1-acoustic-results.md` (~3,800 lines, §§1–25). It is the
 system of record. Every claim in it is either measured or marked withdrawn in
 place; nothing is deleted.
 
@@ -71,7 +71,8 @@ when it succeeded.
 ```
 acoustic.npz                    128/100, 125 spk, CMVN 300      §4/§5 baseline
 acoustic_large.npz              256/200, 125 spk                §7
-acoustic_pooled.npz             128/100, 306 spk                §9, system of record
+acoustic_pooled.npz             128/100, 306 spk                §9, §22 baseline
+acoustic_expanded.npz           128/100, 562 spk                §25 — 4/6 supported
 acoustic_pooled_cmvn_utt.npz    CMVN 0                          §17 control
 acoustic_pooled_cmvn100.npz     CMVN 100                        §17 control
 acoustic_pooled_global.npz      306 spk, global allocation      §21 control
@@ -134,35 +135,9 @@ the like-for-like i-vector column.
 
 ## 3. Running now
 
-**`python -m scripts.train_acoustic --corpus data/corpus/librispeech --corpus
-data/corpus/librispeech-360-full --components 128 --rank 100 --output
-models/acoustic_expanded.npz --report data/reports/training_expanded.json`** —
-the i-vector system on the expanded corpus. ~35-60 min. Log:
-`<scratchpad>/train_562.log`.
-
-**The corpus expansion is done and it beat its projection.** The complete
-`train-clean-360` fetched cleanly from the ELDA mirror — 921 speakers, 20,226
-files, the full 23.05 GB streamed, empty stderr, manifest written.
-
-| | Usable speakers | Recordings | Split |
-|---|---:|---:|---|
-| Old (`librispeech` + `librispeech-360`) | 510 | 2,578 | 306 / 102 / 102 |
-| **New (`librispeech` + `librispeech-360-full`)** | **936** | **4,697** | **562 / 187 / 187** |
-
-1.84× the usable speakers, against the ~761 §5 projected. 194 of the 921 have a
-single session and cannot contribute within-speaker variation; `scan_corpora`
-warns about them and they are excluded from the 936.
-
-**Use the new root INSTEAD of the old, never alongside** — the identifiers
-overlap and `scan_corpora` will refuse the merge. §§9, 22 and 23 keep quoting
-the old root and stay reproducible.
-
-When the model lands, the comparison that means anything is **paired on speakers
-held out by both models**, exactly as §9 did — the two splits differ, so scoring
-each on its own evaluation set rewards whichever saw more of the other's. Use
-`compare_capacity.py --evaluation-speakers`. The live question is whether §9's
-speaker-count trend continues from 306 to 562, now that §22 has shown the
-extractor mattered more than the back-end.
+**Nothing.** The corpus expansion is complete and §25 carries its result: the
+i-vector system on 562 speakers reaches **four of six cells `supported`** on its
+own, without the borrowed extractor.
 
 The corrected-gate loop, for reference: re-extraction (365 min), scoring
 (16 min) and pairing (25 min) all done, and §22 now reports the VAD-gated run
@@ -279,6 +254,15 @@ re-deriving. Each is measured, and several are negative results.
   per-condition percentiles. Result: **71 of 80 admitted, 9 indeterminate, 0
   wrongly excluded.** `GatePolicy`'s ±2.3 band was never touched — widening it
   at either stage would have hidden a real defect.
+- **§25** **The corpus route had not run out.** The complete `train-clean-360`
+  gives 936 usable speakers against 510, split 562/187/187. The **i-vector
+  system** — no borrowed checkpoint, same 128/100 configuration as §9 — reaches
+  `C_llr_min` **0.157 [0.136, 0.189]**, EER **4.87%**, and **four of six cells
+  supported**. The trend at the best cell runs 0.343 (125 spk) → 0.276 (306) →
+  0.157 (562), and the 306→562 gain is *larger* than 125→306. **Not paired
+  against §9** — only 19 speakers are held out by both — so it is a standalone
+  evaluation, and part of reaching `supported` is the interval narrowing from
+  187 evaluation speakers rather than the system improving.
 - **§23** **The ψ₁ spike is corpus structure, by elimination.** It survives a
   complete change of extractor (ECAPA ratio 5.244, inside the i-vector range of
   5.13–7.04), so it is not the i-vector representation. Switching length
@@ -357,37 +341,26 @@ re-deriving. Each is measured, and several are negative results.
 
 ## 5. Open work, in priority order
 
-1. **Corpus expansion — costed, and deliberately not started.**
-   510 usable speakers came from a fetch stopped at 41%. Completing
-   `train-clean-360` reaches ~761; `train-other-500` adds ~1,100. Three things
-   were checked before deciding:
+1. **Combine the two axes: the borrowed extractor on a 562-speaker back-end.**
+   §22 fixed the back-end at 306 and changed the extractor (−0.176, six of six
+   surviving Holm). §25 fixed the extractor and changed the back-end (0.276 →
+   0.157, four of six supported). Neither has been done together, and it is the
+   cheapest large experiment left: extraction is a separate script and the
+   corpus is on disk. Expect ~6 h of extraction over the larger corpus, then 16
+   min to score.
 
-   - **Disk is not the constraint.** The archive is *streamed*, never
-     materialised, and only the selected subset is retained — 4.8 MB per
-     speaker measured on what is already there. Completing `train-clean-360`
-     costs about 2.6 GB and `train-other-500` about 5.3 GB, against 29.5 GB
-     free. The 23 GB figure is transfer, not storage.
-   - **Time is the constraint.** gzip is one continuous stream, so a fetch
-     cannot resume across runs at the member level — only at the byte level
-     within one run. Completing the partial fetch therefore means streaming the
-     whole 23 GB again, roughly 9.5 hours at the ~5.4 Mbit/s this link gives.
-   - **Reproducibility is the real hazard, and it is the reason to stop and
-     think.** `scan_corpora` derives the 306/102/102 split *from the corpus*.
-     Adding 541 speakers to `data/corpus/librispeech-360` changes every split,
-     which silently invalidates the comparability of §9, §22 and §23 against
-     anything computed afterwards. If it is done, fetch into a **new root**
-     (`librispeech-360-full`) and leave the existing one untouched; do not pool
-     the two, and note that `scan_corpora` will refuse the merge anyway because
-     the identifiers overlap.
+2. **Reserve a fixed evaluation set before any further corpus growth.** §25
+   could not be paired against §9 because only **19** speakers were held out by
+   both — the expanded model trained on most of the old model's evaluation set.
+   §9 hit the same problem at 35. Setting aside ~100 speakers now, excluded from
+   every training split forever, makes every future corpus-size comparison
+   paired. Doing it after the next expansion is too late, again.
 
-   **And §22 substantially reduced the value.** The binding constraint was the
-   extractor's speaker count, and that has now been bought with a checkpoint
-   rather than collected. More speakers now buy back-end quality only, which
-   §9 measured at −0.104 for 181 extra speakers against the −0.176 borrowing
-   the extractor delivered. Worth doing eventually; not worth doing before the
-   items above it.
+3. **Sweep capacity at 562 speakers.** §7 found more capacity hurt at 125 and §9
+   noted the LDA ceiling had moved to 305; at 562 it is 561, so rank 200 would
+   now pass through untruncated for the first time. Untested and cheap.
 
-2. ~~**Build an abstention mechanism for the neural extractor.**~~ **Largely
+4. ~~**Build an abstention mechanism for the neural extractor.**~~ **Largely
    done, and it was a repair rather than a build.** The claim behind this item —
    that ECAPA "has no notion" of a recording too short to compare — was wrong.
    The gate existed; it measured wall-clock length under a name that promised

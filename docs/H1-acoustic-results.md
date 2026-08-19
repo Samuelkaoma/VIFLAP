@@ -3831,3 +3831,119 @@ implausible.
 evidence about how often real Zambian fraud recordings would be admitted. What is
 measured is that this detector, on genuine narrowband speech through this
 channel, does not reach this policy's admit threshold.
+
+---
+
+## 25. The corpus was still the constraint: 562 speakers, and the i-vector system reaches supported on its own
+
+§9 established that speaker count binds by moving from 125 to 306 and improving
+five of six cells. §22 then showed the same mechanism operating in the extractor,
+where a borrowed checkpoint trained on ~6,000 speakers reached four `supported`
+cells. That left an obvious question §22 could not answer: **had the corpus route
+run out, or had it simply been abandoned at 306?**
+
+`train-clean-360` was fetched to 41% in §9 and the remainder was never taken. It
+has now been completed.
+
+| | Usable speakers | Recordings | Split |
+|---|---:|---:|---|
+| §9's pooled corpus | 510 | 2,578 | 306 / 102 / 102 |
+| **Complete `train-clean-360`** | **936** | **4,697** | **562 / 187 / 187** |
+
+921 speakers came down, of which 194 have a single session and cannot contribute
+within-speaker variation; `scan_corpora` warns and excludes them. Fetched to a
+**new root** so §§9, 22 and 23 continue to quote the corpus they were computed on.
+Model `ivec-plda-369f609975761fc7`, trained at 128 components and rank 100 — the
+same configuration as §9, deliberately unchanged.
+
+### Result
+
+Evaluated on its own 187 held-out speakers, verified disjoint from the model's
+recorded 562 training speakers. Artefact: `data/reports/h1_expanded.json`.
+
+| Condition | Dur. | §9, 306 spk (102 eval) | EER | **562 spk (187 eval)** | EER | H1 |
+|---|---:|---|---:|---|---:|:---:|
+| clean | 30 s | 0.276 [0.212, 0.383] | 7.89% | **0.157 [0.136, 0.189]** | **4.87%** | **supported** |
+| clean | 15 s | 0.349 [0.288, 0.448] | 9.81% | **0.224 [0.202, 0.257]** | **7.09%** | **supported** |
+| clean | 5 s | 0.539 [0.479, 0.613] | 16.87% | 0.451 [0.427, 0.487] | 14.69% | inconclusive |
+| babble 20 dB | 30 s | 0.295 [0.234, 0.400] | 9.15% | **0.170 [0.150, 0.198]** | **5.47%** | **supported** |
+| babble 20 dB | 15 s | 0.370 [0.313, 0.466] | 10.95% | **0.248 [0.224, 0.281]** | **7.93%** | **supported** |
+| babble 20 dB | 5 s | 0.514 [0.467, 0.601] | 15.96% | 0.454 [0.425, 0.504] | 14.52% | inconclusive |
+
+**Four of six cells reach `supported`, and this is the i-vector system.** No
+borrowed checkpoint, no VoxCeleb2, no architecture change — the same GMM-UBM and
+total-variability stack §4 ran on 125 speakers, given 562 instead of 306.
+
+The trend across the three corpus sizes at the best cell:
+
+| Training speakers | `C_llr_min` | EER |
+|---:|---:|---:|
+| 125 (§4) | 0.343 | 10.86% |
+| 306 (§9) | 0.276 | 7.89% |
+| **562** | **0.157** | **4.87%** |
+
+**The corpus route had not run out.** §9's "no reason to think 306 is where the
+returns stop" is now measured rather than asserted, and the gain from 306 → 562
+(−0.119) is larger than the gain from 125 → 306 (−0.067), which is the opposite
+of the diminishing return one might expect.
+
+The intervals also narrow sharply — [0.136, 0.189] against [0.212, 0.383] — and
+that is a separate effect worth separating: the evaluation partition grew from
+102 speakers to 187, and the bootstrap resamples speakers. Kish effective sample
+size is 179.8 of 187. Part of reaching `supported` is the system being better and
+part is the *interval* being tighter, and the decision rule is on the upper bound,
+so both contribute.
+
+### What this cannot be compared against, and why that is a finding
+
+**There is no clean paired comparison with the 306-speaker model.** Only **19
+speakers** are held out by both, because the expanded model trained on 562 of the
+936 and swept up most of the old model's evaluation set. §9 faced the same problem
+at a milder scale — 23 of its 42 baseline evaluation speakers sat in the pooled
+model's training set — and solved it by scoring both on the 35 held out by both.
+Nineteen is too few: an interval over nineteen speakers describes those nineteen
+people.
+
+So the table above is a **standalone evaluation**, legitimate under §3's rule but
+not a paired difference. It cannot be read as "−0.119 caused by speakers" with the
+confidence §22's paired test carries, because the two rows also differ in *which*
+187 or 102 people were scored.
+
+**The general lesson is worth recording, because it will recur.** Expanding a
+corpus destroys the ability to compare against models trained on the subset,
+unless a fixed evaluation set is reserved *before* the expansion. Had 100
+speakers been set aside at the outset and excluded from every training split,
+every corpus-size comparison this project has made would be paired. They are not,
+and each has had to be restricted after the fact to whatever overlap survived.
+
+### What this does and does not do to §22
+
+**It does not overturn §22, and the two are not in competition.** §22's paired
+test compared extractors on identical trials with the back-end held fixed at 306
+speakers, and −0.176 with six of six surviving Holm is a stronger form of evidence
+than anything here. What §25 adds is that the *other* axis was also unexhausted.
+
+The obvious next experiment is the combination — the borrowed extractor with a
+562-speaker back-end — and it is cheap, because extraction is separate and the
+embeddings for the old corpus already exist. It is the first item in the handoff.
+
+**Neither result escapes §23.** Both are LibriSpeech, and §23's surviving
+explanation for the ψ₁ spike is that each LibriVox reader records in one room with
+one microphone, so a per-reader channel is confounded with the reader. More such
+readers is more of the same confound, and there is a real possibility that part of
+what 562 speakers buys is a better-estimated version of something that will not be
+present in casework.
+
+### What this does not establish
+
+**One configuration, no capacity sweep.** 128 components and rank 100, chosen to
+match §9 rather than to suit 562 speakers. §7 found more capacity hurt on 125
+speakers and §9 noted the LDA ceiling had moved to 305; at 562 it moves to 561, so
+rank 200 would now pass through untruncated. That is untested and is the cheapest
+open experiment on this axis.
+
+**The 5 s cells remain inconclusive**, and their upper bounds (0.487, 0.504) are
+well clear of 0.30. The duration finding of §5 is untouched by corpus size.
+
+**No transferred calibration, no wider channel sweep.** Two conditions and three
+durations, matching §9's standalone table so the two can be read side by side.
