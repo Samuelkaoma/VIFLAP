@@ -141,6 +141,17 @@ class TrainingExample:
     cannot be constructed and the only number obtainable is the one that
     overstates performance."""
 
+    condition: str = ""
+    """Channel condition this example was passed through, where training is
+    multi-condition. Used only to calibrate the out-of-domain floor, and for a
+    specific reason: a single percentile over a *mixture* of conditions is not
+    the low tail of any of them. §24 measured the consequence — the floor
+    flagged 35% of frames from the cleanest condition while passing the noisiest
+    almost entirely, because clean speech has peakier, less average features and
+    therefore lower likelihood under a mixture dominated by noisy audio. The
+    check meant to catch audio unlike anything in training was instead catching
+    the best audio in it."""
+
 
 @dataclass(frozen=True, slots=True)
 class CountermeasureScore:
@@ -306,6 +317,8 @@ class SpoofingCountermeasure:
         spoofed_features: list[NDArray[np.float64]] = []
         attacks: set[str] = set()
 
+        by_condition: dict[str, list[NDArray[np.float64]]] = {}
+
         for example in examples:
             features = instance._features(example.signal, example.sample_rate)
             if features.shape[0] < config.min_frames:
@@ -315,6 +328,7 @@ class SpoofingCountermeasure:
             else:
                 spoofed_features.append(features)
                 attacks.add(example.attack_id)
+            by_condition.setdefault(example.condition, []).append(features)
 
         if not bona_fide_features or not spoofed_features:
             raise InsufficientDataError(
@@ -343,18 +357,55 @@ class SpoofingCountermeasure:
         # per-chunk results are one-dimensional and cost a few megabytes in
         # total, and the percentile over the concatenation is identical to the
         # percentile over a single pass.
-        pooled = np.concatenate(bona_fide_features + spoofed_features)
-        chunk = config.chunk_frames
-        best_of_both = np.concatenate(
-            [
-                np.maximum(
-                    bona_fide.log_likelihood(pooled[start : start + chunk]),
-                    spoofed.log_likelihood(pooled[start : start + chunk]),
+        def best_of_both_over(arrays: Sequence[NDArray[np.float64]]) -> NDArray[np.float64]:
+            pooled = np.concatenate(list(arrays))
+            chunk = config.chunk_frames
+            return np.concatenate(
+                [
+                    np.maximum(
+                        bona_fide.log_likelihood(pooled[start : start + chunk]),
+                        spoofed.log_likelihood(pooled[start : start + chunk]),
+                    )
+                    for start in range(0, pooled.shape[0], chunk)
+                ]
+            )
+
+        # **The floor is a union over conditions, not a percentile of their
+        # mixture.** The rule this feeds asks whether a recording is unlike
+        # *anything* the detector was trained on, and "anything" is a union: a
+        # recording typical of one trained condition is in domain even if it is
+        # atypical of the pooled average of all of them.
+        #
+        # Taking the percentile over the mixture asks a different and wrong
+        # question — whether the recording is typical of the *blend* — and no
+        # single condition is. §24 measured what that cost once multi-condition
+        # training made the distinction bite: with a pooled floor the
+        # out-of-domain fraction ran 0.352 on the cleanest condition and 0.042
+        # on the noisiest, so the check fired hardest on the best audio and the
+        # gate admitted 3 of 80 recordings it was confident were genuine.
+        #
+        # The minimum over per-condition percentiles restores the intended
+        # semantics: every trained condition passes at roughly its own rate, and
+        # only audio below all of them is flagged. Falls back to the pooled
+        # figure when nothing carries a condition label, so a single-condition
+        # model is unchanged.
+        labelled = {c: f for c, f in by_condition.items() if c}
+        if labelled:
+            threshold = min(
+                float(
+                    np.percentile(
+                        best_of_both_over(arrays), config.out_of_domain_percentile
+                    )
                 )
-                for start in range(0, pooled.shape[0], chunk)
-            ]
-        )
-        threshold = float(np.percentile(best_of_both, config.out_of_domain_percentile))
+                for arrays in labelled.values()
+            )
+        else:
+            threshold = float(
+                np.percentile(
+                    best_of_both_over(bona_fide_features + spoofed_features),
+                    config.out_of_domain_percentile,
+                )
+            )
 
         calibration = _fit_calibration_by_cross_validation(
             bona_fide_features, spoofed_features, gmm_config
@@ -385,10 +436,14 @@ class SpoofingCountermeasure:
             "n_bona_fide_recordings": float(len(bona_fide_features)),
             "n_spoofed_recordings": float(len(spoofed_features)),
             "n_attack_types": float(len(attacks)),
-            "n_frames": float(pooled.shape[0]),
+            "n_frames": float(
+                sum(f.shape[0] for f in bona_fide_features + spoofed_features)
+            ),
             "calibration_slope": calibration[0],
             "calibration_intercept": calibration[1],
             "typical_frame_std": typical_frame_std,
+            "out_of_domain_threshold": threshold,
+            "n_conditions": float(len(labelled)),
         }
         return cls(
             config,

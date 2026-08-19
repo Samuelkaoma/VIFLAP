@@ -255,3 +255,84 @@ class TestMultiConditionTraining:
         second = degrade_examples(original, list(TRAINING_CONDITIONS), seed=7)
         for a, b in zip(first, second, strict=True):
             assert np.array_equal(a.signal, b.signal)
+
+
+class TestTheOutOfDomainFloorIsAUnion:
+    """"Unlike anything in training" is a union, not a percentile of a blend.
+
+    §24 measured what the difference costs. With a floor taken over the pooled
+    mixture of eight conditions, the out-of-domain fraction ran 0.352 on the
+    cleanest condition and 0.042 on the noisiest — the check fired hardest on the
+    best audio, because clean speech has peakier features and therefore lower
+    likelihood under a mixture dominated by noisy material. The gate admitted 3
+    of 80 recordings it was simultaneously confident were genuine.
+
+    A recording typical of *one* trained condition is in domain. That is what
+    these tests pin.
+    """
+
+    @staticmethod
+    def _examples(condition: str, offset: float, n: int = 6) -> list[TrainingExample]:
+        rng = np.random.default_rng(abs(hash(condition)) % 1000)
+        out = []
+        for i in range(n):
+            # Four seconds: below roughly three the feature matrix falls
+            # under ``min_frames`` and every example is silently dropped.
+            signal = rng.normal(offset, 0.1, SAMPLE_RATE * 4)
+            out.append(
+                TrainingExample(
+                    signal=signal,
+                    sample_rate=SAMPLE_RATE,
+                    is_bona_fide=(i % 2 == 0),
+                    attack_id="none" if i % 2 == 0 else "lpc_pulse",
+                    condition=condition,
+                )
+            )
+        return out
+
+    def _threshold(self, examples) -> float:
+        model = SpoofingCountermeasure.train(
+            examples, CountermeasureConfig(n_components=2, max_iterations=5)
+        )
+        return float(model.training_summary["out_of_domain_threshold"])
+
+    def test_the_union_floor_is_no_higher_than_the_pooled_one(self) -> None:
+        """The union takes the most permissive condition, so it cannot sit above
+        the mixture's percentile — which is exactly why it stops flagging
+        conditions that were trained on."""
+        labelled = self._examples("a", 0.0) + self._examples("b", 3.0)
+        unlabelled = [
+            TrainingExample(e.signal, e.sample_rate, e.is_bona_fide, e.attack_id)
+            for e in labelled
+        ]
+        assert self._threshold(labelled) <= self._threshold(unlabelled) + 1e-9
+
+    def test_an_unlabelled_training_set_is_unchanged(self) -> None:
+        """Every model trained before this existed carries no condition labels,
+        and must keep behaving exactly as it did."""
+        plain = [
+            TrainingExample(e.signal, e.sample_rate, e.is_bona_fide, e.attack_id)
+            for e in self._examples("a", 0.0) + self._examples("b", 3.0)
+        ]
+        first = self._threshold(plain)
+        second = self._threshold(plain)
+        assert first == pytest.approx(second)
+
+    def test_the_number_of_conditions_is_recorded(self) -> None:
+        """An archive has to say which rule produced its floor; the two are not
+        comparable and nothing else distinguishes them."""
+        model = SpoofingCountermeasure.train(
+            self._examples("a", 0.0) + self._examples("b", 3.0),
+            CountermeasureConfig(n_components=2, max_iterations=5),
+        )
+        assert model.training_summary["n_conditions"] == 2.0
+
+    def test_a_single_condition_behaves_like_no_condition(self) -> None:
+        """One labelled condition is its own union, so the floor is that
+        condition's percentile either way."""
+        one = self._examples("only", 0.0, n=12)
+        stripped = [
+            TrainingExample(e.signal, e.sample_rate, e.is_bona_fide, e.attack_id)
+            for e in one
+        ]
+        assert self._threshold(one) == pytest.approx(self._threshold(stripped))

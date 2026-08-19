@@ -264,6 +264,11 @@ def degrade_examples(
                 sample_rate=example.sample_rate,
                 is_bona_fide=example.is_bona_fide,
                 attack_id=example.attack_id,
+                # Carried so the out-of-domain floor can be calibrated as a
+                # union over conditions rather than a percentile of their
+                # mixture. Without the label the floor silently reverts to the
+                # pooled rule §24 found flagging the cleanest audio hardest.
+                condition=condition.label,
             )
         )
     return degraded
