@@ -135,10 +135,17 @@ the like-for-like i-vector column.
 ## 3. Running now
 
 **`python -m scripts.fetch_corpus --url
-https://www.openslr.org/resources/12/train-clean-360.tar.gz --destination
-data/corpus/librispeech-360-full --max-attempts 40`** — the complete
+https://openslr.elda.org/resources/12/train-clean-360.tar.gz --destination
+data/corpus/librispeech-360-full --max-attempts 200`** — the complete
 `train-clean-360`, 921 speakers against the 380 the partial fetch left. Log:
-`<scratchpad>/fetch_360_full.log`.
+`<scratchpad>/fetch_360_full2.log`.
+
+**Use the ELDA mirror, not `www.openslr.org`.** A first attempt from the
+canonical host reached 46% and then died: the connection dropped at byte
+10,609,776,640 and **all 40 reconnection attempts at that offset failed**.
+`openslr.elda.org` serves the same file, honours `Range` (verified with a 206 at
+that exact offset), and is running at 5.3 MB/s. `us.openslr.org` and
+`openslr.magicdatatech.com` did not respond at all.
 
 **It writes to a NEW root deliberately.** `scan_corpora` derives the
 306/102/102 split *from the corpus*, so adding speakers to
@@ -449,7 +456,9 @@ for no reason.
 | `huggingface.co`, `download.pytorch.org` | **works** |
 | `www.kaggle.com`, `kaggle.com/api/v1` | **works** |
 | `pypi.org`, `files.pythonhosted.org` | works |
-| `openslr.org` | works, **~30 Mbit/s measured** (the ~5.4 Mbit/s in earlier notes was a bad day), intermittent |
+| `www.openslr.org` | works at **~40 Mbit/s**, but **died at 46% of a 23 GB stream** and could not reconnect in 40 tries |
+| **`openslr.elda.org`** | **the mirror to use** — same files, honours `Range`, ~42 Mbit/s |
+| `us.openslr.org`, `openslr.magicdatatech.com` | no response |
 | **`api.github.com`** | **blocked** — the only one that has stayed blocked |
 
 Because `api.github.com` is blocked there is no `gh`, no workflow dispatch and
