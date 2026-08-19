@@ -22,7 +22,7 @@ git -C . log --oneline -20
 python -m pytest -q -p no:randomly
 ```
 
-Then read `docs/H1-acoustic-results.md` (~3,800 lines, §§1–25). It is the
+Then read `docs/H1-acoustic-results.md` (~4,050 lines, §§1–26). It is the
 system of record. Every claim in it is either measured or marked withdrawn in
 place; nothing is deleted.
 
@@ -119,11 +119,25 @@ property of the old wall-clock gate rather than of the corpus.
 `h1_neural_rescored.json` and `h1_pooled_rescored.json` are byproducts of
 generating score archives and are **not** what any section quotes.
 
-**Current best is now the borrowed ECAPA extractor with the same 306-speaker
-back-end: `C_llr_min` 0.099 [0.031, 0.230], EER 2.47% at 12.2 kbit/s clean, 30 s,
-102 evaluation speakers — the first `supported` cell in the document (§22).** The
-pooled i-vector model is 0.276 / 7.89% on the identical trial set and remains the
-reference implementation.
+**Current best: ECAPA embeddings with a 562-speaker back-end (§26).**
+`C_llr_min` **0.033 [0.023, 0.049]**, EER **1.00%** at 12.2 kbit/s clean 30 s,
+on 187 held-out speakers — **six of six cells supported**. Across the project
+the best cell runs 0.343 → 0.276 → 0.099 → 0.033.
+
+The four configurations, all on their own held-out speakers:
+
+```
+i-vector,  306 spk   0.276   §9 / §22 baseline
+ECAPA,     306 spk   0.099   §22 — paired, 6/6 surviving Holm
+i-vector,  562 spk   0.157   §25
+ECAPA,     562 spk   0.033   §26 — current best
+```
+
+**§22 is the only paired result.** §25 and §26 are standalone evaluations under
+§3's rule: their corpora differ from §22's, so the trial sets differ and no
+paired instrument applies. Do not present the 0.343 → 0.033 progression as four
+comparable measurements — they are four models on three different evaluation
+sets.
 
 Do not compare a new result against §9's table without checking which bootstrap
 it used. §9 quotes percentile intervals, §14 recomputed them as BCa, and §18
@@ -135,24 +149,9 @@ the like-for-like i-vector column.
 
 ## 3. Running now
 
-**`python -m scripts.extract_neural --corpus data/corpus/librispeech --corpus
-data/corpus/librispeech-360-full --output data/reports/neural_embeddings_562.npz
---report data/reports/neural_extraction_562.json`** — priority 1, the borrowed
-extractor over the expanded corpus. **~10 hours** (2,826 training recordings at
-30 s, then 935 development and 936 evaluation at two conditions × three
-durations). Log: `<scratchpad>/extract_562.log`. Writes only at the end and is
-idempotent, so relaunch if it died.
-
-Then `score_neural --embeddings data/reports/neural_embeddings_562.npz
---extraction-report data/reports/neural_extraction_562.json` (16 min), which
-fits the back-end on **562** speakers. That is the combination neither §22 nor
-§25 ran: §22 changed the extractor with the back-end fixed at 306, §25 changed
-the back-end with the extractor fixed.
-
-**A caveat for the write-up.** This extraction predates the reserved evaluation
-set, so it uses the drawn split, not the pinned one. It is comparable to §25
-(same corpus, same seed, same split) but still not paired against §22. Passing
-`reserved_evaluation` everywhere is a separate pass and would need re-extraction.
+**Nothing.** §26 closed the last named priority: the borrowed extractor on a
+562-speaker back-end reaches **six of six cells `supported`**, including both
+five-second cells, which no configuration had ever taken past `inconclusive`.
 
 The corrected-gate loop, for reference: re-extraction (365 min), scoring
 (16 min) and pairing (25 min) all done, and §22 now reports the VAD-gated run
@@ -269,6 +268,16 @@ re-deriving. Each is measured, and several are negative results.
   per-condition percentiles. Result: **71 of 80 admitted, 9 indeterminate, 0
   wrongly excluded.** `GatePolicy`'s ±2.3 band was never touched — widening it
   at either stage would have hidden a real defect.
+- **§26** **Both axes at once: six of six cells `supported`.** ECAPA over the
+  expanded corpus with a 562-speaker back-end reaches `C_llr_min` **0.033
+  [0.023, 0.049]**, EER **1.00%**, and takes both five-second cells past
+  `inconclusive` for the first time in the project — §4 had *falsified* three of
+  them. The two gains compose sub-additively at 30 s (−0.119 and −0.177 giving
+  −0.243) and much closer to additively at 5 s, where more of the sum survives
+  because that is the regime §9 said the corpus alone could not fix. ψ₁ fell
+  66.98 → 45.00 on the same extractor, which is §23's small-sample-bias
+  prediction confirmed on data it never saw. **Not paired**, and the run
+  predates the reserved evaluation set.
 - **§25** **The corpus route had not run out.** The complete `train-clean-360`
   gives 936 usable speakers against 510, split 562/187/187. The **i-vector
   system** — no borrowed checkpoint, same 128/100 configuration as §9 — reaches
@@ -356,13 +365,14 @@ re-deriving. Each is measured, and several are negative results.
 
 ## 5. Open work, in priority order
 
-1. **Combine the two axes: the borrowed extractor on a 562-speaker back-end.**
-   §22 fixed the back-end at 306 and changed the extractor (−0.176, six of six
-   surviving Holm). §25 fixed the extractor and changed the back-end (0.276 →
-   0.157, four of six supported). Neither has been done together, and it is the
-   cheapest large experiment left: extraction is a separate script and the
-   corpus is on disk. Expect ~6 h of extraction over the larger corpus, then 16
-   min to score.
+1. **Re-run §26 under the reserved evaluation set.** §26 is the project's best
+   result and it is *standalone*, because it predates
+   `viflap/evaluation/reserved.py`. Passing `reserved_evaluation=` through
+   `scan_corpora`/`split_by_speaker` in `extract_neural`, `score_neural`,
+   `train_acoustic` and `evaluate_h1`, then re-extracting, makes §22, §25 and
+   §26 comparable on one fixed evaluation set and lets `compare_extractors`
+   pair them. ~10 h of extraction. **This is what turns a progression of four
+   numbers into four measurements.**
 
 2. ~~**Reserve a fixed evaluation set before any further corpus growth.**~~
    **Done.** `viflap/evaluation/reserved.py` names 100 speakers and

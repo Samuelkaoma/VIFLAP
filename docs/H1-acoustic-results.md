@@ -3947,3 +3947,101 @@ well clear of 0.30. The duration finding of §5 is untouched by corpus size.
 
 **No transferred calibration, no wider channel sweep.** Two conditions and three
 durations, matching §9's standalone table so the two can be read side by side.
+
+---
+
+## 26. Both axes at once: H1 supported in every cell, including five seconds
+
+§22 changed the extractor with the back-end fixed at 306 speakers. §25 changed
+the back-end with the extractor fixed. Neither had been done together, and there
+was no reason to assume the two gains would compose — §7 is the standing reminder
+that a plausible improvement can be worse in all six cells, and both of these
+buy the same commodity, speakers, at different stages.
+
+They compose, and more than additively at the hard end.
+
+ECAPA embeddings over the expanded corpus (624 minutes of extraction), back-end
+fitted on **562** speakers, evaluated on the same 187 held-out speakers as §25.
+Artefacts: `data/reports/neural_embeddings_562.npz`,
+`neural_extraction_562.json`, `h1_neural_562.json`.
+
+| Condition | Dur. | i-vector, 306 | ECAPA, 306 (§22) | i-vector, 562 (§25) | **ECAPA, 562** | EER | H1 |
+|---|---:|---:|---:|---:|---|---:|:---:|
+| clean | 30 s | 0.276 | 0.099 | 0.157 | **0.033 [0.023, 0.049]** | **1.00%** | **supported** |
+| clean | 15 s | 0.349 | 0.126 | 0.224 | **0.058 [0.046, 0.074]** | **1.60%** | **supported** |
+| clean | 5 s | 0.539 | 0.228 | 0.451 | **0.165 [0.147, 0.188]** | **4.64%** | **supported** |
+| babble 20 dB | 30 s | 0.295 | 0.114 | 0.170 | **0.046 [0.033, 0.066]** | **1.20%** | **supported** |
+| babble 20 dB | 15 s | 0.370 | 0.156 | 0.248 | **0.078 [0.064, 0.098]** | **2.11%** | **supported** |
+| babble 20 dB | 5 s | 0.514 | 0.252 | 0.454 | **0.193 [0.171, 0.227]** | **5.26%** | **supported** |
+
+**Six of six cells reach `supported`, and that includes both five-second cells.**
+No configuration in this document had ever taken a five-second cell past
+`inconclusive` — §4 *falsified* three of them, and §9's withdrawal of that
+falsification was the good news at the time.
+
+At the best cell, `C_llr_min` runs 0.343 → 0.276 → 0.099 → **0.033** across the
+project, and EER 10.86% → 7.89% → 2.47% → **1.00%**.
+
+### The two gains compose, and the composition is worth reading carefully
+
+Taking clean 30 s and treating the 306-speaker i-vector system as the baseline:
+
+| | `C_llr_min` | Reduction from baseline |
+|---|---:|---:|
+| i-vector, 306 spk | 0.276 | — |
+| i-vector, 562 spk (§25) | 0.157 | −0.119 |
+| ECAPA, 306 spk (§22) | 0.099 | −0.177 |
+| **ECAPA, 562 spk** | **0.033** | **−0.243** |
+
+−0.119 and −0.177 separately, −0.243 together. That is **less than the sum**
+(−0.296), which is what one should expect when both changes buy the same
+underlying commodity: the second helping of speakers is worth less once the first
+has been eaten. The interesting part is at the other end of the duration range.
+At 5 s clean the two gains are −0.088 and −0.311 separately and **−0.374**
+together, and at 5 s babble −0.060 and −0.262 give **−0.321** — proportionally
+much more of the sum survives where the channel is harshest, which is the regime
+§9 identified as the one the corpus could not fix.
+
+### What this does not establish, and one thing it should not be read as
+
+**Not paired against anything.** Like §25, this is a standalone evaluation on 187
+speakers under §3's rule. §22's paired instrument is not available here because
+the two configurations do not share a trial set: the corpus differs, so the
+splits differ. The reserved evaluation set added in this session is exactly the
+fix for that, and **this run predates it** — it uses the drawn split, so it is
+comparable to §25 (same corpus, same seed, same split) and not to §22.
+
+**Part of the interval narrowing is the evaluation set, not the system.** 187
+speakers against 102, and the decision rule is on the upper bound. §25 makes the
+same point and it applies here with the same force.
+
+**This is not a claim about E3FS3 or about `forensic_eval_01`.** A matched
+`C_llr` of 0.033 on this corpus sits below the 0.085–0.097 §12 quotes for E3FS3's
+case-specific conditions, and that comparison is **not available to make**. §12
+was rewritten once for precisely this error — best cell against best condition,
+across datasets, with different enrolment. The like-for-like benchmark remains
+`forensic_eval_01`, on which E3FS3α reaches 0.208 and this system has never been
+run. Reporting 0.033 alongside their 0.208 as though the two were commensurable
+would be the same mistake with a better number attached.
+
+**§23 governs the absolute figures.** Both axes are LibriSpeech, and §23's
+surviving explanation for the ψ₁ spike is that each LibriVox reader records in
+one room with one microphone, so a per-reader channel is confounded with the
+reader. Doubling the readers doubles the confound. A 1.00% EER on read audiobook
+speech through a parametric channel model is not a forecast for Zambian
+telephony, and the gap between them is the least measured quantity in this
+document.
+
+**And the validity gate still governs whether any of it is admitted.** §24
+measures that at 71 of 80 once both of its defects are fixed. `C_llr_min` 0.033
+is what the acoustic stream achieves when it is heard at all.
+
+### A note on ψ₁, which moved the way §23 predicted
+
+The 562-speaker back-end reports ψ₁ = **45.00** against the 306-speaker
+back-end's 66.98 on the same extractor. §23's speaker sweep found ψ₁ strongly
+upward-biased at small samples — 181.1 at 75 speakers against 61.0 at 306 — and
+predicted it would keep falling. It did, on data §23 never saw. That is a
+prediction confirmed rather than a coincidence noted, and it is the second
+independent confirmation that the *leading eigenvalue* is a small-sample artefact
+even though the *ratio* §1 tracks is not.
