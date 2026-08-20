@@ -154,16 +154,37 @@ the like-for-like i-vector column.
 
 ## 3. Running now
 
-**Nothing.** §26 is now **paired**: the extractor's contribution at 562 speakers
-is −0.124 to −0.287 across six cells, all excluding zero, all surviving Holm, all
-on identical trial sets.
+**`python -m scripts.extract_neural --corpus data/corpus/librispeech --corpus
+data/corpus/librispeech-360-full --output
+data/reports/neural_embeddings_pinned.npz --report
+data/reports/neural_extraction_pinned.json`** — ECAPA over the 562-speaker
+corpus on the **pinned** split. **~10 hours.** Log:
+`<scratchpad>/extract_pinned.log`. Writes only at the end and is idempotent, so
+relaunch if it died.
 
-That was possible without re-extraction because §25 and §26 used the same corpus,
-seed and split, so they already shared a trial set — 437,113 trials at 30 s and
-15 s, and identical counts at 5 s too, meaning both front-ends refused the same
-recordings. Only the i-vector side lacked persisted scores; `evaluate_h1
---scores` supplied them in 85 minutes rather than the 10 hours a re-extraction
-would have cost, and its point estimates reproduce §25 exactly.
+`split_by_speaker` now defaults to the reserved set, so this needs no flag —
+which is the point. All 100 reserved speakers are held out on this corpus
+(the older 510-speaker one contains only 44).
+
+**The remaining chain, in order.** Each is a separate heavy job; run one at a
+time.
+
+```bash
+python -m scripts.train_acoustic --corpus data/corpus/librispeech --corpus data/corpus/librispeech-360-full --components 128 --rank 100 --output models/acoustic_pinned.npz --report data/reports/training_pinned.json
+python -m scripts.evaluate_h1 --model models/acoustic_pinned.npz --corpus data/corpus/librispeech --corpus data/corpus/librispeech-360-full --bitrates 12.20 --noise babble --snrs 20.0 --durations 30 15 5 --resamples 2000 --output data/reports/h1_pinned.json --scores data/reports/h1_pinned_scores.npz
+python -m scripts.score_neural --embeddings data/reports/neural_embeddings_pinned.npz --extraction-report data/reports/neural_extraction_pinned.json --resamples 2000 --output data/reports/h1_neural_pinned.json --scores data/reports/h1_neural_pinned_scores.npz
+python -m scripts.compare_extractors --baseline data/reports/h1_pinned_scores.npz --variant data/reports/h1_neural_pinned_scores.npz --output data/reports/h1_extractor_paired_pinned.json --resamples 2000
+```
+
+~55 min, ~85 min, ~20 min, ~60 min. Then write §27.
+
+**What this buys, and what it does not.** Everything computed after it is
+comparable to everything else computed after it, forever. It does **not**
+retrospectively make §22 comparable: §22 is on the 306-speaker corpus, which
+holds only 44 of the reserved speakers, so closing that gap needs the old corpus
+chain re-run too — a further ~14 h and a 44-speaker evaluation set. Decide
+whether that is worth it before starting; the alternative is to treat §§22-26 as
+the historical record and require the pinned set from here on.
 
 The corrected-gate loop, for reference: re-extraction (365 min), scoring
 (16 min) and pairing (25 min) all done, and §22 now reports the VAD-gated run
