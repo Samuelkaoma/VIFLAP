@@ -90,7 +90,12 @@ neural_embeddings_vad.npz  ECAPA, corrected gate — WHAT §22 QUOTES  §22
 neural_extraction_vad.json 12 and 73 refusals at 5 s, 0 elsewhere    §22
 h1_neural_vad.json         the §22 result table
 h1_neural_vad_scores.npz   ECAPA per-trial scores (~16 min)
-h1_extractor_paired_vad.json  6/6 identical trial sets, 6/6 Holm    §22
+h1_extractor_paired_vad.json  §22's pairing, 6/6 identical, 6/6 Holm
+h1_neural_562.npz / h1_neural_562.json   ECAPA on the 562 corpus  §26
+h1_neural_562_scores.npz      ECAPA per-trial scores            §26
+h1_expanded.json              i-vector on the 562 corpus        §25
+h1_expanded_scores.npz        i-vector per-trial scores (~85 min)
+h1_extractor_paired_562.json  §26's pairing, 6/6 identical, 6/6 Holm
 h1_neural_lda100.json      the §22 dimension control
 h1_pooled_ownership.json   the i-vector baseline §22 compares to
 h1_pooled_scores.npz       i-vector per-trial scores (~43 min)
@@ -149,9 +154,16 @@ the like-for-like i-vector column.
 
 ## 3. Running now
 
-**Nothing.** §26 closed the last named priority: the borrowed extractor on a
-562-speaker back-end reaches **six of six cells `supported`**, including both
-five-second cells, which no configuration had ever taken past `inconclusive`.
+**Nothing.** §26 is now **paired**: the extractor's contribution at 562 speakers
+is −0.124 to −0.287 across six cells, all excluding zero, all surviving Holm, all
+on identical trial sets.
+
+That was possible without re-extraction because §25 and §26 used the same corpus,
+seed and split, so they already shared a trial set — 437,113 trials at 30 s and
+15 s, and identical counts at 5 s too, meaning both front-ends refused the same
+recordings. Only the i-vector side lacked persisted scores; `evaluate_h1
+--scores` supplied them in 85 minutes rather than the 10 hours a re-extraction
+would have cost, and its point estimates reproduce §25 exactly.
 
 The corrected-gate loop, for reference: re-extraction (365 min), scoring
 (16 min) and pairing (25 min) all done, and §22 now reports the VAD-gated run
@@ -268,16 +280,18 @@ re-deriving. Each is measured, and several are negative results.
   per-condition percentiles. Result: **71 of 80 admitted, 9 indeterminate, 0
   wrongly excluded.** `GatePolicy`'s ±2.3 band was never touched — widening it
   at either stage would have hidden a real defect.
-- **§26** **Both axes at once: six of six cells `supported`.** ECAPA over the
-  expanded corpus with a 562-speaker back-end reaches `C_llr_min` **0.033
-  [0.023, 0.049]**, EER **1.00%**, and takes both five-second cells past
-  `inconclusive` for the first time in the project — §4 had *falsified* three of
-  them. The two gains compose sub-additively at 30 s (−0.119 and −0.177 giving
-  −0.243) and much closer to additively at 5 s, where more of the sum survives
-  because that is the regime §9 said the corpus alone could not fix. ψ₁ fell
-  66.98 → 45.00 on the same extractor, which is §23's small-sample-bias
-  prediction confirmed on data it never saw. **Not paired**, and the run
-  predates the reserved evaluation set.
+- **§26** **Both axes at once: six of six cells `supported`, and paired.** ECAPA
+  over the expanded corpus with a 562-speaker back-end reaches `C_llr_min`
+  **0.033 [0.023, 0.049]**, EER **1.00%**, and takes both five-second cells past
+  `inconclusive` for the first time — §4 had *falsified* three of them. The
+  extractor's contribution is **paired against §25** on identical trials:
+  −0.124 to −0.287, six of six excluding zero and surviving Holm.
+  **The extractor is worth less once the back-end has more speakers**, and the
+  shrinkage is concentrated at long duration — the advantage falls ~0.05 at 30 s
+  and does not move at all at 5 s babble (−0.262 → −0.261), which is §9's
+  "the corpus helps where the channel is mild" seen from the other side. ψ₁ fell
+  66.98 → 45.00, confirming §23's small-sample-bias prediction on data it never
+  saw. **Still not paired against §22** — different corpora, different splits.
 - **§25** **The corpus route had not run out.** The complete `train-clean-360`
   gives 936 usable speakers against 510, split 562/187/187. The **i-vector
   system** — no borrowed checkpoint, same 128/100 configuration as §9 — reaches
@@ -365,14 +379,14 @@ re-deriving. Each is measured, and several are negative results.
 
 ## 5. Open work, in priority order
 
-1. **Re-run §26 under the reserved evaluation set.** §26 is the project's best
-   result and it is *standalone*, because it predates
-   `viflap/evaluation/reserved.py`. Passing `reserved_evaluation=` through
-   `scan_corpora`/`split_by_speaker` in `extract_neural`, `score_neural`,
-   `train_acoustic` and `evaluate_h1`, then re-extracting, makes §22, §25 and
-   §26 comparable on one fixed evaluation set and lets `compare_extractors`
-   pair them. ~10 h of extraction. **This is what turns a progression of four
-   numbers into four measurements.**
+1. **Put §22, §25 and §26 on one evaluation set.** Each is internally paired —
+   §22 at 306 speakers, §26 at 562 — but they sit on **two** evaluation sets, so
+   the 0.343 → 0.033 progression is four models on two sets rather than four
+   comparable measurements. `viflap/evaluation/reserved.py` pins 100 speakers
+   and `split_by_speaker` takes `reserved_evaluation=`, but **no script passes
+   it yet**. Thread it through `extract_neural`, `train_acoustic` and
+   `evaluate_h1`, then re-extract (~10 h). Everything after that is comparable
+   to everything else forever; nothing before it is.
 
 2. ~~**Reserve a fixed evaluation set before any further corpus growth.**~~
    **Done.** `viflap/evaluation/reserved.py` names 100 speakers and

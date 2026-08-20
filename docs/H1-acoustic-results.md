@@ -3982,6 +3982,74 @@ falsification was the good news at the time.
 At the best cell, `C_llr_min` runs 0.343 → 0.276 → 0.099 → **0.033** across the
 project, and EER 10.86% → 7.89% → 2.47% → **1.00%**.
 
+### And it is paired
+
+The table above is a standalone evaluation, which §22's paired instrument was
+built precisely to improve on. It applies here after all, and for a reason worth
+stating: §25 and §26 used the **same corpus, the same seed and the same split**,
+so they scored an identical trial set — 1,500 same-source and 435,613
+different-source at 30 s and 15 s, and identical counts at 5 s too, which also
+means the i-vector front-end and the corrected neural gate refused *the same
+recordings*. Only the i-vector side lacked persisted scores, and that cost 85
+minutes rather than the ten hours a re-extraction would have.
+
+Difference is `ECAPA − i-vector` on `C_llr_min` at 562 speakers, so **negative
+favours the borrowed extractor**. BCa at B = 2000, resampling speakers, Holm over
+six cells. Artefact: `data/reports/h1_extractor_paired_562.json`.
+
+| Condition | Dur. | i-vector | ECAPA | Difference [95% CI] | Holm | Trials |
+|---|---:|---:|---:|---|:---:|---:|
+| clean | 30 s | 0.157 | 0.033 | **−0.124 [−0.153, −0.103]** | **✓** | 437,113 |
+| clean | 15 s | 0.224 | 0.058 | **−0.167 [−0.193, −0.145]** | **✓** | 437,113 |
+| clean | 5 s | 0.451 | 0.165 | **−0.287 [−0.314, −0.263]** | **✓** | 421,370 |
+| babble 20 dB | 30 s | 0.170 | 0.046 | **−0.124 [−0.150, −0.103]** | **✓** | 437,113 |
+| babble 20 dB | 15 s | 0.248 | 0.078 | **−0.170 [−0.197, −0.145]** | **✓** | 437,113 |
+| babble 20 dB | 5 s | 0.454 | 0.193 | **−0.261 [−0.299, −0.225]** | **✓** | 337,068 |
+
+**Six of six exclude zero, six survive Holm, all on identical trial sets.** So
+the extractor's contribution at 562 speakers is established at a stated
+confidence, and §26 is no longer a standalone result.
+
+### The extractor advantage shrinks where the corpus helped most
+
+Set against §22, which ran the same comparison with the back-end at 306:
+
+| Condition | Dur. | §22 difference (306 spk) | §26 difference (562 spk) | Change |
+|---|---:|---:|---:|---:|
+| clean | 30 s | −0.176 | −0.124 | +0.052 |
+| clean | 15 s | −0.223 | −0.167 | +0.056 |
+| clean | 5 s | −0.310 | −0.287 | +0.023 |
+| babble 20 dB | 30 s | −0.180 | −0.124 | +0.056 |
+| babble 20 dB | 15 s | −0.215 | −0.170 | +0.045 |
+| babble 20 dB | 5 s | −0.262 | −0.261 | **+0.001** |
+
+**The borrowed extractor is worth less once the back-end has more speakers, and
+the shrinkage is concentrated at long duration.** At 30 s the advantage falls by
+about 0.05; at 5 s babble it does not move at all (−0.262 → −0.261).
+
+That is the same story §9 told from the other side. Doubling the back-end's
+speakers recovers information the i-vector system could not previously reach —
+but only where the channel is mild enough for the information to survive. At five
+seconds in babble it recovers nothing, so the extractor's advantage there is
+untouched: whatever ECAPA is doing at 5 s is something 256 extra back-end
+speakers cannot substitute for.
+
+**Neither §22's comparison nor this one is subsumed by the other.** §22 measures
+the extractor at 306 speakers, this measures it at 562, and the difference between
+the two differences is the interaction — measurable here only because both are
+paired on identical trials. A single number for "what the extractor is worth"
+would have concealed that it depends on what it is being added to.
+
+### What is still not paired
+
+**§22 against §26.** Their corpora differ, so their splits differ, so no trial set
+is shared and the four-configuration progression in the table above remains four
+models on **two** evaluation sets rather than one. `viflap/evaluation/reserved.py`
+exists to fix that for everything computed after it, and nothing in this document
+was. Re-running §22, §25 and §26 with `reserved_evaluation=` threaded through
+would put all of them on one fixed set of 100 speakers; it costs a re-extraction
+and is the first item in the handoff.
+
 ### The two gains compose, and the composition is worth reading carefully
 
 Taking clean 30 s and treating the 306-speaker i-vector system as the baseline:
@@ -4004,12 +4072,12 @@ much more of the sum survives where the channel is harshest, which is the regime
 
 ### What this does not establish, and one thing it should not be read as
 
-**Not paired against anything.** Like §25, this is a standalone evaluation on 187
-speakers under §3's rule. §22's paired instrument is not available here because
-the two configurations do not share a trial set: the corpus differs, so the
-splits differ. The reserved evaluation set added in this session is exactly the
-fix for that, and **this run predates it** — it uses the drawn split, so it is
-comparable to §25 (same corpus, same seed, same split) and not to §22.
+**Paired against §25, not against §22.** The extractor's contribution at 562
+speakers is established above at a stated confidence, six of six surviving Holm
+on identical trials. What is *not* paired is this configuration against §22's,
+because their corpora differ and so no trial set is shared. The reserved
+evaluation set added in this session fixes that for everything computed after it,
+and **this run predates it**.
 
 **Part of the interval narrowing is the evaluation set, not the system.** 187
 speakers against 102, and the decision rule is on the upper bound. §25 makes the
