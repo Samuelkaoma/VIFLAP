@@ -45,6 +45,7 @@ import soundfile as sf
 from numpy.typing import NDArray
 
 from viflap.domain.errors import InsufficientDataError, InvalidEvidenceError
+from viflap.evaluation.reserved import RESERVED_EVALUATION_SPEAKERS
 
 __all__ = [
     "CorpusSplit",
@@ -384,7 +385,7 @@ def split_by_speaker(
     development_fraction: float = 0.2,
     evaluation_fraction: float = 0.2,
     seed: int = 20250601,
-    reserved_evaluation: Collection[str] | None = None,
+    reserved_evaluation: Collection[str] = RESERVED_EVALUATION_SPEAKERS,
 ) -> CorpusSplit[ItemT]:
     """Partition recordings three ways with no speaker in more than one part.
 
@@ -407,6 +408,13 @@ def split_by_speaker(
     and the remaining fractions are taken over what is left, so two corpora
     sharing a reserved list share an evaluation set exactly.
 
+    **It defaults to the project's list rather than to nothing, deliberately.**
+    An opt-in guarantee is one every caller must remember, and forgetting is
+    exactly how §9 and §25 lost their comparability — nothing warned, because
+    both splits were internally valid either way. Pass ``frozenset()`` to
+    disable it, which is needed only to reproduce an artefact computed before
+    this existed.
+
     Reserved identifiers absent from ``recordings`` are ignored rather than
     raising: the list is a superset covering corpora this call may not hold, and
     refusing would make it unusable on any subset.
@@ -418,7 +426,7 @@ def split_by_speaker(
     for recording in recordings:
         by_speaker.setdefault(recording.speaker_id, []).append(recording)
 
-    reserved = set(reserved_evaluation or ()) & set(by_speaker)
+    reserved = set(reserved_evaluation) & set(by_speaker)
 
     rng = np.random.default_rng(seed)
     speakers = sorted(set(by_speaker) - reserved)

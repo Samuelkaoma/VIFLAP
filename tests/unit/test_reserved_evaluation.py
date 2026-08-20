@@ -34,11 +34,42 @@ def _corpus(n_speakers: int, per_speaker: int = 3) -> list[_Item]:
 
 class TestTheProblem:
     def test_growing_the_corpus_reshuffles_the_evaluation_set(self) -> None:
-        """The defect, demonstrated. This is why §25 could not be paired."""
-        small = {p.speaker_id for p in split_by_speaker(_corpus(60)).evaluation}
-        large = {p.speaker_id for p in split_by_speaker(_corpus(120)).evaluation}
+        """The defect, demonstrated. This is why §25 could not be paired.
+
+        Reserving is explicitly disabled here: with the project default in force
+        these synthetic identifiers match nothing, so the test would pass for
+        the wrong reason on a real corpus and silently stop demonstrating
+        anything.
+        """
+        none: frozenset[str] = frozenset()
+        small = {
+            p.speaker_id
+            for p in split_by_speaker(_corpus(60), reserved_evaluation=none).evaluation
+        }
+        large = {
+            p.speaker_id
+            for p in split_by_speaker(_corpus(120), reserved_evaluation=none).evaluation
+        }
         # Most of the smaller corpus's held-out speakers do not survive.
         assert len(small & large) < len(small) * 0.6, len(small & large)
+
+
+class TestTheDefault:
+    """An opt-in guarantee is one every caller must remember to want."""
+
+    def test_reserving_is_on_by_default(self) -> None:
+        import inspect
+
+        default = inspect.signature(split_by_speaker).parameters[
+            "reserved_evaluation"
+        ].default
+        assert default is RESERVED_EVALUATION_SPEAKERS
+
+    def test_it_can_be_switched_off_for_reproducing_older_artefacts(self) -> None:
+        """Artefacts predating the reserved set were computed on the drawn
+        split, and reproducing one has to remain possible."""
+        split = split_by_speaker(_corpus(60), reserved_evaluation=frozenset())
+        assert split.summary()["evaluation_speakers"] > 0
 
 
 class TestReserving:
