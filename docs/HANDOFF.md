@@ -252,7 +252,10 @@ Sections that reached a conclusion this project should not spend time
 re-deriving. Each is measured, and several are negative results.
 
 - **§7** More parameters on the same corpus: all 6 cells significantly worse,
-  all survive Holm. Capacity was never the constraint.
+  all survive Holm. Capacity was never the constraint. **The measurement stands;
+  read the interpretation with item 3 of §5 beside it** — the stored variant
+  carries a 124-dimensional PLDA transform rather than the 200 it asked for,
+  because at 125 training speakers the LDA ceiling is 124. Do not re-run §7.
 - **§9** More speakers at the same parameters: 5/6 better, 4 survive Holm. The
   corpus was the constraint.
 - **§10** The countermeasure is *structurally* blind to phase-only attacks. 25×
@@ -435,11 +438,38 @@ re-deriving. Each is measured, and several are negative results.
    superset of the current 936 shares all hundred.** Do not edit the list — the
    module docstring explains why.
 
-3. **Sweep capacity at 562 speakers.** §7 found more capacity hurt at 125 and §9
-   noted the LDA ceiling had moved to 305; at 562 it is 561, so rank 200 would
-   now pass through untruncated for the first time. Untested and cheap. Run it
-   **on the pinned split**, after the chain in §3, or it lands on a third
-   evaluation set and item 1 has to be paid for again.
+3. **Sweep capacity at 562 speakers.** §7 found more capacity hurt at 125, and
+   the reason is now measured rather than assumed. `fit_transform_chain` sets
+   the LDA output to `min(i-vector rank, n_training_speakers − 1)`, and the
+   stored models say what that did: `acoustic_large.npz` — §7's 256/200 variant
+   — carries a PLDA transform of **124** dimensions, not 200. Its ceiling was
+   `125 − 1`. The baseline beside it, at rank 100, lost nothing. **So §7
+   compared an untruncated small model against a large one whose extra rank was
+   38% unusable**, which is a confound in the interpretation, not in the
+   measurement: the six cells were significantly worse and that stands.
+
+   **The earlier note in this file was wrong about where the ceiling binds** and
+   is corrected here rather than deleted. It said 562 speakers let rank 200
+   through untruncated "for the first time"; in fact `min(200, 305) = 200`, so
+   306 speakers would already have done it. What is true is that **no rank-200
+   model has ever been trained above 125 speakers**, so the question is open at
+   any size above that.
+
+   The clean experiment holds components fixed and moves only the rank, because
+   §7 moved both:
+
+   ```bash
+   python -m scripts.train_acoustic --corpus data/corpus/librispeech --corpus data/corpus/librispeech-360-full --components 128 --rank 200 --output models/acoustic_pinned_rank200.npz --report data/reports/training_pinned_rank200.json
+   python -m scripts.compare_capacity --baseline models/acoustic_pinned.npz --variant models/acoustic_pinned_rank200.npz --corpus data/corpus/librispeech --corpus data/corpus/librispeech-360-full --bitrates 12.20 --noise babble --snrs 20.0 --durations 30 15 5 --resamples 2000 --output data/reports/h1_capacity_pinned.json
+   ```
+
+   `compare_capacity` degrades once and embeds with both models, restricting to
+   the recordings both embedded, so this is **paired** — do not substitute two
+   `evaluate_h1` runs. Verify the variant's PLDA transform really is 200×200
+   before scoring it; if it is not, the ceiling bound again and the comparison
+   is not the one intended. Run it **on the pinned split**, after the chain in
+   §3, or it lands on a third evaluation set and item 1 has to be paid for
+   again.
 
 4. **Measure how often the validity gate correctly EXCLUDES a spoof.** §24
    measured admission on genuine speech only — 71 of 80 — and named this as the
