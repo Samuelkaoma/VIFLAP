@@ -26,6 +26,26 @@ previously sat at six percent CPU for hours. Recordings are therefore
 materialised, degraded, embedded and **discarded** in batches, so peak memory is
 set by the batch rather than by the corpus.
 
+Progress is on disk, not only in the process
+---------------------------------------------
+This run takes about ten hours on the 936-speaker corpus, and the first attempt
+at it died in the fifth of five blocks having written nothing at all: the script
+saved once, at the end. Ten hours of embeddings existed only as Python lists in
+a process that no longer existed.
+
+So a checkpoint is written after **every batch** — not every block. Block
+granularity would have saved four fifths of that run, but the training block
+alone is over five hours and losing it is still the largest single loss
+available. At batch granularity the worst case is one batch, about fifteen
+minutes. The checkpoint is uncompressed because it is rewritten roughly 120
+times over a run and compression would cost more than the crash insurance is
+worth; only the final artefact is compressed.
+
+Resuming is guarded by a fingerprint of everything that would change the answer
+— extractor, seed, durations, corpora, split and conditions. A checkpoint that
+does not match is refused rather than silently continued, because a resumed run
+that mixes two configurations produces an artefact no section could describe.
+
 What is deliberately not here
 ------------------------------
 No scores, no ``C_llr``, no verdict. This produces vectors. Comparing them
@@ -40,8 +60,10 @@ import argparse
 import json
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, TypeAlias
 
 import numpy as np
 from numpy.typing import NDArray
@@ -61,6 +83,66 @@ from viflap.domain.errors import InsufficientDataError
 #: extractor and the operating system room on a 12 GB machine.
 BATCH = 120
 
+#: Bumped when the checkpoint layout changes in a way that makes an older file
+#: unreadable. A stale checkpoint is refused on this before anything else.
+CHECKPOINT_VERSION = 1
+
+#: Key under which the checkpoint's JSON metadata is stored inside the ``.npz``.
+META_KEY = "__meta__"
+
+#: Per-duration accumulators: vectors, speaker ids, recording ids, and a
+#: one-element list holding the refusal count so it can be mutated in place.
+Collected: TypeAlias = dict[
+    "float | None", tuple[list[NDArray[np.float64]], list[str], list[str], list[int]]
+]
+
+
+@dataclass(frozen=True, slots=True)
+class Block:
+    """One condition over one partition — the unit a checkpoint completes.
+
+    ``condition`` is either a single condition for the whole partition or one
+    per recording, which is what the multi-condition training block needs.
+    ``report_condition`` is what the extraction report calls it, and differs
+    from ``name`` for training because "multi" is not a condition label.
+    """
+
+    name: str
+    condition: DegradationCondition | Sequence[DegradationCondition]
+    durations: list[float | None]
+    plans: Sequence[RecordingPlan]
+    partition: str
+    report_condition: str
+
+
+def cell_key(block: str, duration: float | None) -> str:
+    """The ``.npz`` key prefix for one block at one duration.
+
+    Duration ``None`` means the block ran at full length and carries no suffix,
+    which is what the training block does and what every downstream reader
+    already expects.
+    """
+    return block if duration is None else f"{block}@{duration:g}"
+
+
+def _empty(durations: Sequence[float | None]) -> Collected:
+    return {duration: ([], [], [], [0]) for duration in durations}
+
+
+def _finalise(
+    collected: Collected,
+) -> dict[float | None, tuple[NDArray[np.float64], list[str], list[str], int]]:
+    """Stack the accumulators into arrays without consuming them."""
+    return {
+        duration: (
+            np.stack(vectors) if vectors else np.zeros((0, 0)),
+            speakers,
+            ids,
+            refused[0],
+        )
+        for duration, (vectors, speakers, ids, refused) in collected.items()
+    }
+
 
 def extract(
     plans: Sequence[RecordingPlan],
@@ -71,6 +153,9 @@ def extract(
     seed: int,
     workers: int | None,
     label: str,
+    resume: Collected | None = None,
+    start_index: int = 0,
+    on_batch: Callable[[int, Collected], None] | None = None,
 ) -> dict[float | None, tuple[NDArray[np.float64], list[str], list[str], int]]:
     """Embed a partition under one condition, at every duration, in batches.
 
@@ -90,14 +175,19 @@ def extract(
     than dropped silently: §6 records that at short durations they are not
     random with respect to difficulty — they remove the recordings carrying
     least speech, which are the hardest — so the count is part of the result.
+
+    ``start_index`` and ``resume`` restart a block part-way through. Batches are
+    aligned to plan order and the degradation seed does not vary with the batch,
+    so recording *n* is degraded identically whether the run reached it in one
+    pass or two. ``on_batch`` is called after every batch with the number of
+    plans consumed so far and the live accumulators, which is what makes the
+    checkpoint a record of the current batch rather than of the current block.
     """
-    collected: dict[
-        float | None, tuple[list[NDArray[np.float64]], list[str], list[str], list[int]]
-    ] = {duration: ([], [], [], [0]) for duration in durations}
+    collected: Collected = resume if resume is not None else _empty(durations)
     started = time.monotonic()
 
     per_recording = not isinstance(condition, DegradationCondition)
-    for start in range(0, len(plans), BATCH):
+    for start in range(start_index, len(plans), BATCH):
         chunk = list(plans[start : start + BATCH])
         conditions_for_chunk = (
             list(condition)[start : start + BATCH] if per_recording else [condition]
@@ -118,22 +208,133 @@ def extract(
                 speakers.append(piece.speaker_id)
                 ids.append(piece.recording_id)
         done = min(start + BATCH, len(plans))
+        if on_batch is not None:
+            on_batch(done, collected)
         elapsed = time.monotonic() - started
+        fresh = max(done - start_index, 1)
         print(
             f"    {label}: {done}/{len(plans)} in {elapsed / 60:.1f} min "
-            f"({elapsed / max(done, 1):.2f} s/rec across {len(durations)} durations)",
+            f"({elapsed / fresh:.2f} s/rec across {len(durations)} durations)",
             flush=True,
         )
 
-    return {
-        duration: (
-            np.stack(vectors) if vectors else np.zeros((0, 0)),
-            speakers,
-            ids,
-            refused[0],
+    return _finalise(collected)
+
+
+def checkpoint_path_for(output: Path, override: Path | None) -> Path:
+    """Where the running checkpoint lives, next to the artefact it will become."""
+    if override is not None:
+        return override
+    return output.with_name(output.stem + ".checkpoint.npz")
+
+
+def save_checkpoint(
+    path: Path,
+    *,
+    fingerprint: dict[str, object],
+    arrays: dict[str, NDArray[Any]],
+    summary: list[dict[str, object]],
+    completed: Sequence[str],
+    partial: dict[str, Any] | None,
+    elapsed_minutes: float,
+) -> None:
+    """Write the checkpoint atomically, so a crash mid-write cannot corrupt it.
+
+    Uncompressed on purpose: this is rewritten after every batch and compression
+    would spend minutes over a run protecting against a failure that costs one
+    batch. The final artefact is compressed; this is not the final artefact.
+
+    ``elapsed_minutes`` is carried so that a resumed run reports the total cost
+    of producing the artefact rather than the cost of its last attempt, which
+    would understate it every time and is the sort of figure that gets quoted.
+    """
+    meta = json.dumps(
+        {
+            "version": CHECKPOINT_VERSION,
+            "fingerprint": fingerprint,
+            "summary": summary,
+            "completed": list(completed),
+            "partial": partial,
+            "elapsed_minutes": elapsed_minutes,
+        }
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    with temporary.open("wb") as handle:
+        np.savez(handle, **arrays, **{META_KEY: np.array(meta, dtype=np.str_)})
+    temporary.replace(path)
+
+
+def load_checkpoint(
+    path: Path, fingerprint: dict[str, object]
+) -> tuple[
+    dict[str, NDArray[Any]],
+    list[dict[str, object]],
+    set[str],
+    dict[str, Any] | None,
+    float,
+]:
+    """Read a checkpoint, refusing one that does not match this run.
+
+    Refusing rather than warning is deliberate. A checkpoint from a different
+    seed, corpus or extractor would resume into an artefact that is half one
+    configuration and half another, and nothing downstream could detect it — the
+    file would be well-formed and the numbers would be wrong.
+    """
+    with np.load(path, allow_pickle=False) as loaded:
+        meta = json.loads(str(loaded[META_KEY]))
+        arrays = {key: loaded[key] for key in loaded.files if key != META_KEY}
+
+    if meta.get("version") != CHECKPOINT_VERSION:
+        raise ValueError(
+            f"{path} was written by checkpoint version {meta.get('version')}, "
+            f"this script writes version {CHECKPOINT_VERSION}; delete it to restart"
         )
-        for duration, (vectors, speakers, ids, refused) in collected.items()
-    }
+    stored = meta.get("fingerprint")
+    if stored != fingerprint:
+        differing = sorted(
+            key
+            for key in set(fingerprint) | set(stored or {})
+            if (stored or {}).get(key) != fingerprint.get(key)
+        )
+        raise ValueError(
+            f"{path} was written for a different configuration (differs in "
+            f"{', '.join(differing)}); point --checkpoint elsewhere or delete it"
+        )
+    return (
+        arrays,
+        list(meta["summary"]),
+        set(meta["completed"]),
+        meta["partial"],
+        float(meta.get("elapsed_minutes", 0.0)),
+    )
+
+
+def restore_block(
+    arrays: dict[str, NDArray[Any]],
+    block: str,
+    durations: Sequence[float | None],
+    refused: dict[str, int],
+) -> Collected:
+    """Turn the checkpoint's arrays back into live accumulators for one block."""
+    collected: Collected = {}
+    for duration in durations:
+        key = cell_key(block, duration)
+        vectors = arrays.get(f"{key}|vectors")
+        speakers = arrays.get(f"{key}|speakers")
+        ids = arrays.get(f"{key}|recordings")
+        if vectors is None or speakers is None or ids is None:
+            collected[duration] = ([], [], [], [refused.get(key, 0)])
+            continue
+        collected[duration] = (
+            [np.asarray(row, dtype=np.float64) for row in np.atleast_2d(vectors)]
+            if vectors.size
+            else [],
+            [str(value) for value in speakers],
+            [str(value) for value in ids],
+            [refused.get(key, 0)],
+        )
+    return collected
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -148,6 +349,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--durations", type=float, nargs="+", default=[30.0, 15.0, 5.0])
     parser.add_argument("--workers", type=int, default=None)
     parser.add_argument("--seed", type=int, default=DEGRADATION_SEED)
+    parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        default=None,
+        help="where to keep resumable progress; defaults to <output>.checkpoint.npz",
+    )
+    parser.add_argument(
+        "--restart",
+        action="store_true",
+        help="ignore and overwrite any existing checkpoint",
+    )
     arguments = parser.parse_args(argv)
 
     corpora = arguments.corpus or [
@@ -165,72 +377,150 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"  extractor: {extractor.extractor_id}", flush=True)
     print(f"  workers for degradation: {worker_count(arguments.workers)}", flush=True)
 
-    saved: dict[str, NDArray[np.float64]] = {}
-    summary: list[dict[str, object]] = []
-    started = time.monotonic()
+    evaluation_conditions = [
+        DegradationCondition(bitrate_kbps=12.20),
+        DegradationCondition(bitrate_kbps=12.20, noise_type=NoiseType.BABBLE, snr_db=20.0),
+    ]
+    train_conditions = assign_conditions(
+        [p.speaker_id for p in split.train], seed=arguments.seed
+    )
 
     # Training first, multi-condition and at full duration. The back-end is
     # fitted on the same channel mixture the i-vector system was, so the two
     # differ in the extractor and in nothing else.
-    print("[train] multi-condition, 30 s", flush=True)
-    train_conditions = assign_conditions(
-        [p.speaker_id for p in split.train], seed=arguments.seed
-    )
-    vectors, speakers, ids, refused = extract(
-        split.train,
-        train_conditions,
-        [None],
-        extractor,
-        seed=arguments.seed,
-        workers=arguments.workers,
-        label="train",
-    )[None]
-    saved["train|vectors"] = vectors
-    saved["train|speakers"] = np.array(speakers, dtype=np.str_)
-    saved["train|recordings"] = np.array(ids, dtype=np.str_)
-    summary.append(
-        {
-            "partition": "train",
-            "condition": "multi",
-            "duration_seconds": 30.0,
-            "n_embeddings": int(vectors.shape[0]),
-            "n_refused": refused,
-        }
-    )
-
-    evaluation_conditions = [
-        DegradationCondition(bitrate_kbps=12.20),
-        DegradationCondition(bitrate_kbps=12.20, noise_type=NoiseType.BABBLE, snr_db=20.0),
+    blocks: list[Block] = [
+        Block("train", train_conditions, [None], split.train, "train", "multi")
     ]
     for partition, partition_plans in (
         ("development", split.development),
         ("evaluation", split.evaluation),
     ):
         for condition in evaluation_conditions:
-            print(f"[{partition}|{condition.label}] all durations", flush=True)
-            per_duration = extract(
-                partition_plans,
-                condition,
-                list(arguments.durations),
-                extractor,
-                seed=arguments.seed,
-                workers=arguments.workers,
-                label=f"{partition}|{condition.label}",
-            )
-            for duration, (vectors, speakers, ids, refused) in per_duration.items():
-                key = f"{partition}|{condition.label}@{duration:g}"
-                saved[f"{key}|vectors"] = vectors
-                saved[f"{key}|speakers"] = np.array(speakers, dtype=np.str_)
-                saved[f"{key}|recordings"] = np.array(ids, dtype=np.str_)
-                summary.append(
-                    {
-                        "partition": partition,
-                        "condition": condition.label,
-                        "duration_seconds": duration,
-                        "n_embeddings": int(vectors.shape[0]),
-                        "n_refused": refused,
-                    }
+            blocks.append(
+                Block(
+                    f"{partition}|{condition.label}",
+                    condition,
+                    [float(d) for d in arguments.durations],
+                    partition_plans,
+                    partition,
+                    condition.label,
                 )
+            )
+
+    fingerprint: dict[str, object] = {
+        "extractor_id": extractor.extractor_id,
+        "seed": int(arguments.seed),
+        "durations": [float(d) for d in arguments.durations],
+        "corpora": [str(root) for root in corpora],
+        "split": split.summary(),
+        "batch": BATCH,
+        "training_conditions": [c.label for c in TRAINING_CONDITIONS],
+        "blocks": [block.name for block in blocks],
+    }
+
+    checkpoint = checkpoint_path_for(arguments.output, arguments.checkpoint)
+    saved: dict[str, NDArray[Any]] = {}
+    summary: list[dict[str, object]] = []
+    completed: set[str] = set()
+    partial: dict[str, Any] | None = None
+    accrued_minutes = 0.0
+
+    if arguments.restart and checkpoint.exists():
+        checkpoint.unlink()
+        print(f"  discarded {checkpoint} at --restart", flush=True)
+    if checkpoint.exists():
+        saved, summary, completed, partial, accrued_minutes = load_checkpoint(
+            checkpoint, fingerprint
+        )
+        print(
+            f"  resuming from {checkpoint}: {len(completed)} of {len(blocks)} blocks "
+            f"complete after {accrued_minutes:.1f} min, partial={json.dumps(partial)}",
+            flush=True,
+        )
+
+    started = time.monotonic()
+
+    def elapsed_minutes() -> float:
+        return round(accrued_minutes + (time.monotonic() - started) / 60, 1)
+
+    for block in blocks:
+        if block.name in completed:
+            print(f"[{block.name}] already in the checkpoint, skipping", flush=True)
+            continue
+
+        resume: Collected | None = None
+        start_index = 0
+        if partial is not None and partial.get("block") == block.name:
+            start_index = int(partial["done"])
+            refused = {
+                str(key): int(value) for key, value in partial["refused"].items()
+            }
+            resume = restore_block(saved, block.name, block.durations, refused)
+            print(
+                f"[{block.name}] resuming at recording "
+                f"{start_index}/{len(block.plans)}",
+                flush=True,
+            )
+        else:
+            print(f"[{block.name}] {len(block.durations)} duration(s)", flush=True)
+
+        def record(done: int, collected: Collected, block: Block = block) -> None:
+            arrays = dict(saved)
+            refused_now: dict[str, int] = {}
+            for duration, cell in _finalise(collected).items():
+                key = cell_key(block.name, duration)
+                arrays[f"{key}|vectors"] = cell[0]
+                arrays[f"{key}|speakers"] = np.array(cell[1], dtype=np.str_)
+                arrays[f"{key}|recordings"] = np.array(cell[2], dtype=np.str_)
+                refused_now[key] = cell[3]
+            save_checkpoint(
+                checkpoint,
+                fingerprint=fingerprint,
+                arrays=arrays,
+                summary=summary,
+                completed=sorted(completed),
+                partial={"block": block.name, "done": done, "refused": refused_now},
+                elapsed_minutes=elapsed_minutes(),
+            )
+
+        per_duration = extract(
+            block.plans,
+            block.condition,
+            block.durations,
+            extractor,
+            seed=arguments.seed,
+            workers=arguments.workers,
+            label=block.name,
+            resume=resume,
+            start_index=start_index,
+            on_batch=record,
+        )
+
+        for duration, (vectors, speakers, ids, refused_count) in per_duration.items():
+            key = cell_key(block.name, duration)
+            saved[f"{key}|vectors"] = vectors
+            saved[f"{key}|speakers"] = np.array(speakers, dtype=np.str_)
+            saved[f"{key}|recordings"] = np.array(ids, dtype=np.str_)
+            summary.append(
+                {
+                    "partition": block.partition,
+                    "condition": block.report_condition,
+                    "duration_seconds": 30.0 if duration is None else duration,
+                    "n_embeddings": int(vectors.shape[0]),
+                    "n_refused": refused_count,
+                }
+            )
+        completed.add(block.name)
+        partial = None
+        save_checkpoint(
+            checkpoint,
+            fingerprint=fingerprint,
+            arrays=saved,
+            summary=summary,
+            completed=sorted(completed),
+            partial=None,
+            elapsed_minutes=elapsed_minutes(),
+        )
 
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(arguments.output, **saved)
@@ -241,13 +531,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "split": split.summary(),
                 "training_conditions": [c.label for c in TRAINING_CONDITIONS],
                 "durations": list(arguments.durations),
-                "elapsed_minutes": round((time.monotonic() - started) / 60, 1),
+                "elapsed_minutes": elapsed_minutes(),
                 "cells": summary,
             },
             indent=2,
         ),
         encoding="utf-8",
     )
+    checkpoint.unlink(missing_ok=True)
     print(f"\nwrote {arguments.output} and {arguments.report}", flush=True)
     return 0
 
