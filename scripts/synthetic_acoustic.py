@@ -31,6 +31,22 @@ embedding, a real countermeasure verdict and three simulated streams reach
 fusion, the gate and the audit chain without anything in between silently
 dropping evidence or admitting what it should refuse.
 
+Admission on genuine speech is half the question
+------------------------------------------------
+§24 measured how often the gate admits real speech — 71 of 80 — and recorded
+plainly that the other half was untouched: "How often this gate *correctly
+excludes* a spoofed recording through the channel is a separate experiment, and
+the EERs above suggest the answer is 'not reliably'." ``--spoof`` runs that
+experiment. Every recording is replaced by a spoofed version of itself before
+the channel, and the arms are reported beside the genuine one, because an
+exclusion rate with nothing to compare it to cannot distinguish a gate that
+detects synthesis from a gate that refuses everything.
+
+**These are seen attacks.** The deployed detector trained on all four families,
+so the exclusion rates this produces are the optimistic case and are not a
+forecast for an attack it has not met. The honest generalisation figure remains
+§24's leave-one-family-out mean unseen-attack EER of 29.37%.
+
 Why the gate needs audio to be exercised at all
 -----------------------------------------------
 `CompareIncidents._validity_absence` consults the assessment only for streams
@@ -45,6 +61,8 @@ embedding came from.
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import hashlib
 import json
 import sys
 from collections.abc import Mapping, Sequence
@@ -53,20 +71,42 @@ from pathlib import Path
 
 import numpy as np
 
-from scripts.corpus import RecordingPlan, materialise, scan_corpora, split_by_speaker
+from scripts.corpus import (
+    Recording,
+    RecordingPlan,
+    materialise,
+    scan_corpora,
+    split_by_speaker,
+)
 from scripts.experiment import degrade_many
 from scripts.synthesise_incidents import Incident, Operator
 from viflap.analysis.channel.degradation import DegradationCondition
 from viflap.analysis.speaker.pipeline import AcousticEmbedding, SpeakerComparisonSystem
+from viflap.analysis.spoof.attacks import ATTACKS, apply_attack
 from viflap.analysis.spoof.countermeasure import SpoofingCountermeasure
 from viflap.analysis.spoof.gate import ValidityGate
-from viflap.domain.errors import InsufficientDataError
+from viflap.domain.errors import (
+    ConvergenceError,
+    InsufficientDataError,
+    InvalidEvidenceError,
+)
 from viflap.domain.evidence import ValidityAssessment
 
 #: The channel every synthetic incident is heard through. One condition, because
 #: the point here is composition rather than a duration or bitrate sweep — §4 and
 #: §22 do that properly on the real corpus.
 CONDITION = DegradationCondition(bitrate_kbps=12.20)
+
+#: Base seed for the attack realisations generated here. Deliberately *not*
+#: `train_countermeasure.ATTACK_SEED`: a recording that appeared in both places
+#: would otherwise be spoofed identically, and the detector would be scored on
+#: the exact waveform it was fitted to. Different base, different realisation,
+#: no possibility of that.
+EVALUATION_ATTACK_SEED = 20260824
+
+#: The label used for the unspoofed arm, so genuine and spoofed results sit in
+#: one table under the same keys.
+GENUINE = "none"
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +166,44 @@ def plan_for(
     return recordings[index % len(recordings)]
 
 
+def spoof(
+    recordings: Sequence[Recording], attack_id: str
+) -> tuple[list[Recording | None], list[str]]:
+    """Replace each recording with a spoofed version of itself, before the channel.
+
+    **Attack first, channel second**, which is both the order
+    `train_countermeasure.degrade_examples` uses and the order the threat runs
+    in: an attacker synthesises a waveform and then puts it through a telephone.
+    Spoofing after the coder would model an adversary who can inject audio into
+    the network, which is a different and much stronger threat than the one this
+    detector is for.
+
+    Attacks that fail are reported rather than skipped. A family that cannot be
+    generated on a fifth of the recordings has an exclusion rate computed over a
+    subset selected by whatever made the generation fail, and that is not the
+    same quantity as an exclusion rate.
+    """
+    spoofed: list[Recording | None] = []
+    failures: list[str] = []
+    for recording in recordings:
+        digest = hashlib.sha256(
+            f"{recording.recording_id}:{attack_id}".encode()
+        ).digest()
+        rng = np.random.default_rng(
+            EVALUATION_ATTACK_SEED + int.from_bytes(digest[:4], "big")
+        )
+        try:
+            signal = apply_attack(
+                attack_id, recording.signal, recording.sample_rate, rng
+            )
+        except (ConvergenceError, InsufficientDataError, InvalidEvidenceError) as error:
+            failures.append(f"{recording.recording_id}: {type(error).__name__}")
+            spoofed.append(None)
+            continue
+        spoofed.append(dataclasses.replace(recording, signal=signal))
+    return spoofed, failures
+
+
 def build_acoustic(
     incidents: Sequence[Incident],
     bound: Mapping[str, Sequence[RecordingPlan]],
@@ -134,16 +212,35 @@ def build_acoustic(
     *,
     workers: int | None = None,
     seed: int = 20250601,
-) -> dict[str, AcousticEvidence]:
-    """Degrade, embed and judge one recording per incident.
+    attack_id: str = GENUINE,
+) -> tuple[dict[str, AcousticEvidence], list[str]]:
+    """Optionally spoof, then degrade, embed and judge one recording per incident.
 
     The countermeasure sees the **same degraded signal** the embedding came from.
     Judging clean audio and embedding degraded audio would make the gate's
     verdict describe a recording the system never scored, which is exactly the
     mismatch a validity gate exists to prevent elsewhere.
+
+    With ``attack_id`` set, every recording is spoofed before it reaches the
+    channel, and the question the run answers inverts: not how often the gate
+    admits genuine speech, but how often it **excludes** speech that is not.
     """
     plans = [plan_for(incident, bound) for incident in incidents]
-    degraded = degrade_many(materialise(plans), [CONDITION], seed=seed, workers=workers)
+    recordings = materialise(plans)
+    failures: list[str] = []
+    if attack_id != GENUINE:
+        outcomes, failures = spoof(recordings, attack_id)
+        # Kept positionally rather than by recording id: one operator's
+        # incidents reuse recordings, so ids are not unique across the list and
+        # matching on them would drop the wrong incidents.
+        surviving = [
+            (incident, recording)
+            for incident, recording in zip(incidents, outcomes, strict=True)
+            if recording is not None
+        ]
+        incidents = [incident for incident, _ in surviving]
+        recordings = [recording for _, recording in surviving]
+    degraded = degrade_many(recordings, [CONDITION], seed=seed, workers=workers)
 
     evidence: dict[str, AcousticEvidence] = {}
     for incident, item in zip(incidents, degraded, strict=True):
@@ -158,7 +255,7 @@ def build_acoustic(
             embedding=embedding,
             validity=gate.assess(item.recording_id, item.signal, item.sample_rate),
         )
-    return evidence
+    return evidence, failures
 
 
 def summarise(evidence: Mapping[str, AcousticEvidence]) -> dict[str, object]:
@@ -198,6 +295,31 @@ def summarise(evidence: Mapping[str, AcousticEvidence]) -> dict[str, object]:
     }
 
 
+def summarise_arm(
+    attack_id: str, evidence: Mapping[str, AcousticEvidence], failures: Sequence[str]
+) -> dict[str, object]:
+    """One arm of the spoof sweep, named and with its failures carried.
+
+    ``n_excluded`` is what a spoofed arm is asking about and ``n_admitted`` is
+    what it is afraid of. Both are reported for the genuine arm too, because an
+    exclusion rate is only interpretable beside the rate on speech that is real:
+    a gate excluding every spoof and every genuine recording alike has not
+    detected anything.
+    """
+    verdicts = summarise(evidence)["verdicts"]
+    assert isinstance(verdicts, dict)
+    return {
+        "attack_id": attack_id,
+        "seen_in_training": attack_id in ATTACKS,
+        "n_generation_failures": len(failures),
+        "generation_failures": list(failures[:10]),
+        "n_excluded": verdicts.get("excluded", 0),
+        "n_indeterminate": verdicts.get("indeterminate", 0),
+        "n_admitted": verdicts.get("admitted", 0),
+        **summarise(evidence),
+    }
+
+
 def load_corpus(
     roots: Sequence[Path], target_seconds: float = 30.0
 ) -> list[RecordingPlan]:
@@ -229,6 +351,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--output", type=Path, default=Path("data/reports/synthetic_acoustic.json")
     )
+    parser.add_argument(
+        "--spoof",
+        nargs="+",
+        default=None,
+        choices=[*sorted(ATTACKS), "all"],
+        help=(
+            "also run the sweep with every recording spoofed by these attack "
+            "families before the channel, and report how often the gate "
+            "excludes them. The genuine arm always runs alongside, because an "
+            "exclusion rate means nothing without it."
+        ),
+    )
     arguments = parser.parse_args(argv)
 
     roots = arguments.corpus or [
@@ -255,11 +389,31 @@ def main(argv: Sequence[str] | None = None) -> int:
     gate = ValidityGate(SpoofingCountermeasure.load(arguments.countermeasure))
     print(f"model {system.model_id}, detector {gate.detector_id}", flush=True)
 
-    evidence = build_acoustic(
-        incidents, bound, system, gate, workers=arguments.workers, seed=arguments.seed
+    families = (
+        sorted(ATTACKS)
+        if arguments.spoof and "all" in arguments.spoof
+        else list(arguments.spoof or [])
     )
+    arms: list[dict[str, object]] = []
+    evidence: dict[str, AcousticEvidence] = {}
+    for attack_id in [GENUINE, *families]:
+        print(f"[{attack_id}]", flush=True)
+        arm_evidence, failures = build_acoustic(
+            incidents,
+            bound,
+            system,
+            gate,
+            workers=arguments.workers,
+            seed=arguments.seed,
+            attack_id=attack_id,
+        )
+        if attack_id == GENUINE:
+            evidence = arm_evidence
+        arm = summarise_arm(attack_id, arm_evidence, failures)
+        print(json.dumps(arm, indent=2), flush=True)
+        arms.append(arm)
+
     summary = summarise(evidence)
-    print(json.dumps(summary, indent=2), flush=True)
 
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     arguments.output.write_text(
@@ -276,6 +430,23 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "n_operators": len(operators),
                 "n_incidents": len(incidents),
                 **summary,
+                # Present only when --spoof was asked for, so a run without it
+                # reproduces the artefact §24 quotes rather than a superset of
+                # it under the same keys.
+                **({"arms": arms} if families else {}),
+                **(
+                    {
+                        "spoof_caveat": (
+                            "The deployed detector trained on all four attack "
+                            "families, so these exclusion rates are the "
+                            "seen-attack case and an upper bound. The "
+                            "leave-one-family-out figure for this detector is "
+                            "a mean unseen-attack EER of 29.37%."
+                        )
+                    }
+                    if families
+                    else {}
+                ),
             },
             indent=2,
         ),
