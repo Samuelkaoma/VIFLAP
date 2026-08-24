@@ -45,7 +45,7 @@ powershell -Command "Get-CimInstance Win32_Process -Filter 'Name=\"python.exe\"'
 
 | | |
 |---|---|
-| Tests | **803, all passing** (~7 min) |
+| Tests | **817, all passing** (~7 min) |
 | ruff | clean (`viflap scripts tests`) |
 | mypy | **63 errors on `viflap`** — pre-existing baseline, not a regression |
 | Git | clean, all pushed, `main` |
@@ -96,6 +96,7 @@ h1_neural_562_scores.npz      ECAPA per-trial scores            §26
 h1_expanded.json              i-vector on the 562 corpus        §25
 h1_expanded_scores.npz        i-vector per-trial scores (~85 min)
 h1_extractor_paired_562.json  §26's pairing, 6/6 identical, 6/6 Holm
+neural_embeddings_pinned.checkpoint.npz  IN PROGRESS — deleted on success
 h1_neural_lda100.json      the §22 dimension control
 h1_pooled_ownership.json   the i-vector baseline §22 compares to
 h1_pooled_scores.npz       i-vector per-trial scores (~43 min)
@@ -158,13 +159,24 @@ the like-for-like i-vector column.
 data/corpus/librispeech-360-full --output
 data/reports/neural_embeddings_pinned.npz --report
 data/reports/neural_extraction_pinned.json`** — ECAPA over the 562-speaker
-corpus on the **pinned** split. **~10 hours.** Log:
-`<scratchpad>/extract_pinned.log`. Writes only at the end and is idempotent, so
-relaunch if it died.
+corpus on the **pinned** split. **~10.5 hours.** Log:
+`<scratchpad>/extract_pinned2.log`.
 
 `split_by_speaker` now defaults to the reserved set, so this needs no flag —
 which is the point. All 100 reserved speakers are held out on this corpus
 (the older 510-speaker one contains only 44).
+
+**This is the second attempt.** The first (pid 59676, log
+`<scratchpad>/extract_pinned.log`) reached the fifth of five blocks and lost
+everything: the machine rebooted at 13:40 on 20 Aug, the log's last line is
+13:27 in `evaluation|amr12.2_babble20dB`, and the script wrote only at the end.
+It now **checkpoints after every batch** to
+`data/reports/neural_embeddings_pinned.checkpoint.npz`, so relaunching the same
+command resumes rather than restarting; `--restart` discards the checkpoint, and
+a checkpoint whose fingerprint (extractor, seed, durations, corpora, split,
+conditions, batch size) does not match is refused rather than resumed. The
+checkpoint is deleted when the final artefact is written, so **its presence
+means the run is unfinished**. Worst case on a crash is one batch, ~15 min.
 
 **The remaining chain, in order.** Each is a separate heavy job; run one at a
 time.
@@ -222,10 +234,15 @@ differ in the third decimal (bootstrap noise between runs), so **§22 keeps
 quoting `h1_pooled_ownership.json`**, not `h1_pooled_rescored.json`.
 
 Timings for planning: `extract_neural` 330-365 min at ~6-7 s per recording per
-three durations; `score_neural --resamples 2000` 16 min; `evaluate_h1` over
-6 cells ~43 min; `compare_extractors` at B = 2000 about 25 min and
-single-threaded — each resample runs a PAV over 133,645 trials for both systems,
-plus a 102-fold jackknife.
+three durations, and ~630 min over the 936-speaker corpus; `score_neural
+--resamples 2000` 16 min; `evaluate_h1` over 6 cells ~43 min;
+`compare_extractors` at B = 2000 about 25 min and single-threaded — each
+resample runs a PAV over 133,645 trials for both systems, plus a 102-fold
+jackknife.
+
+`extract_neural` spends its first several minutes in `scan_corpora` reading
+FLAC headers, disk-bound at ~1% CPU, before the first progress line. That is
+not a stalled job — check `UserModeTime` is still creeping rather than assuming.
 
 ---
 
@@ -403,11 +420,11 @@ re-deriving. Each is measured, and several are negative results.
 1. **Put §22, §25 and §26 on one evaluation set.** Each is internally paired —
    §22 at 306 speakers, §26 at 562 — but they sit on **two** evaluation sets, so
    the 0.343 → 0.033 progression is four models on two sets rather than four
-   comparable measurements. `viflap/evaluation/reserved.py` pins 100 speakers
-   and `split_by_speaker` takes `reserved_evaluation=`, but **no script passes
-   it yet**. Thread it through `extract_neural`, `train_acoustic` and
-   `evaluate_h1`, then re-extract (~10 h). Everything after that is comparable
-   to everything else forever; nothing before it is.
+   comparable measurements. **The threading is done** — `split_by_speaker`
+   defaults to the reserved list, so every script gets it without a flag — and
+   what remains is running the chain in §3. Everything computed after it is
+   comparable to everything else computed after it, forever; nothing before it
+   is.
 
 2. ~~**Reserve a fixed evaluation set before any further corpus growth.**~~
    **Done.** `viflap/evaluation/reserved.py` names 100 speakers and
@@ -420,9 +437,34 @@ re-deriving. Each is measured, and several are negative results.
 
 3. **Sweep capacity at 562 speakers.** §7 found more capacity hurt at 125 and §9
    noted the LDA ceiling had moved to 305; at 562 it is 561, so rank 200 would
-   now pass through untruncated for the first time. Untested and cheap.
+   now pass through untruncated for the first time. Untested and cheap. Run it
+   **on the pinned split**, after the chain in §3, or it lands on a third
+   evaluation set and item 1 has to be paid for again.
 
-4. ~~**Build an abstention mechanism for the neural extractor.**~~ **Largely
+4. **Measure how often the validity gate correctly EXCLUDES a spoof.** §24
+   measured admission on genuine speech only — 71 of 80 — and named this as the
+   missing half. **The mechanism is built and tested; the measurement has not
+   been run.** `scripts/synthetic_acoustic.py --spoof all` replaces every
+   recording with a spoofed version of itself *before* the channel and reports
+   the gate's verdicts per family beside the genuine arm. Write to a **new**
+   path — `data/reports/synthetic_acoustic_spoofed.json` — because §24 quotes
+   `synthetic_acoustic_union.json` in three tables:
+
+   ```bash
+   python -m scripts.synthetic_acoustic --model models/acoustic_pooled.npz --countermeasure models/countermeasure_union.npz --corpus data/corpus/librispeech --corpus data/corpus/librispeech-360 --spoof all --output data/reports/synthetic_acoustic_spoofed.json
+   ```
+
+   Two things to settle before writing it up. **These are seen attacks** — the
+   deployed detector trained on all four families, so any exclusion rate is the
+   optimistic case, and §24's leave-one-family-out mean unseen-attack EER of
+   29.37% is the honest generalisation figure. And **check whether the
+   countermeasure's 312 training speakers overlap the evaluation partition
+   `synthetic_acoustic` binds operators to** (`countermeasure_union.json` lists
+   them). If they do, the figure is optimistic for a second, separate reason and
+   §24's genuine-speech figure inherits the same caveat. Untested either way —
+   test it before writing either sentence down.
+
+5. ~~**Build an abstention mechanism for the neural extractor.**~~ **Largely
    done, and it was a repair rather than a build.** The claim behind this item —
    that ECAPA "has no notion" of a recording too short to compare — was wrong.
    The gate existed; it measured wall-clock length under a name that promised
@@ -516,6 +558,15 @@ Start-Process python -ArgumentList ... -RedirectStandardOutput <log> -RedirectSt
 then tail the file. Jobs started this way have survived a session restart;
 harness-backgrounded Bash commands have not.
 
+**They do not survive a reboot, and Windows reboots itself.** The first pinned
+extraction was killed at 13:40 on 20 Aug by an unattended restart, ten hours in
+and having written nothing. `LastBootUpTime` from
+`Get-CimInstance Win32_OperatingSystem` is what identifies this: a job whose log
+stops a few minutes before the boot time did not crash, it was terminated.
+**Any job over about an hour should checkpoint to disk** — `extract_neural`
+does, after every batch, and anything added to the heavy list should too. A
+script that saves once at the end is a script that can lose its whole run.
+
 **Bash has no network. PowerShell does.** Anything that fetches must run under
 PowerShell.
 
@@ -575,6 +626,14 @@ python -c "import json,re; doc=open('docs/H1-acoustic-results.md',encoding='utf-
 
 The rule "read the numbers back from the artefact" is not satisfied by having
 *seen* the artefact's numbers go past in a log. Parse the file.
+
+**Assert the row count before asserting anything about the rows.** A regex that
+matches nothing passes every later assertion, which has happened. §26 has been
+checked this way — all 18 rows across its three tables, against
+`h1_neural_562.json`, `h1_expanded.json`, `h1_neural_vad.json`,
+`h1_pooled_ownership.json`, `h1_extractor_paired_562.json` and
+`h1_extractor_paired_vad.json`, plus `n_cells_with_identical_trial_sets == 6` —
+and every cell matched. §§22 and 25 have not been re-checked this way.
 
 ---
 
