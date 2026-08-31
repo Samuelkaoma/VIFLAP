@@ -153,30 +153,36 @@ the like-for-like i-vector column.
 
 ---
 
-## 3. Running now
+## 3. The pinned chain: where it has got to
 
-**`python -m scripts.extract_neural --corpus data/corpus/librispeech --corpus
-data/corpus/librispeech-360-full --output
-data/reports/neural_embeddings_pinned.npz --report
-data/reports/neural_extraction_pinned.json`** — ECAPA over the 562-speaker
-corpus on the **pinned** split. **~10.5 hours.** Log:
-`<scratchpad>/extract_pinned2.log`.
+**Step 1 of 5 is done.** `neural_embeddings_pinned.npz` and
+`neural_extraction_pinned.json` exist, written 24 Aug after **585.3 minutes**
+(9 h 45 m). The checkpoint file is gone, which is how a completed run is
+recognised: it is deleted only when the final artefact has been written.
 
-`split_by_speaker` now defaults to the reserved set, so this needs no flag —
-which is the point. All 100 reserved speakers are held out on this corpus
-(the older 510-speaker one contains only 44).
+Verified from the archive rather than from the log — **all 100 reserved
+speakers are in the evaluation partition, none leaked into train or
+development, and the three partitions are pairwise disjoint.** Split
+562 / 187 / 187, 2827 / 933 / 937 recordings. Refusals are zero at 30 s and
+15 s and appear only at 5 s: 12 and 15 clean, 114 and 114 in babble — the same
+shape §22 reports after the gate correction (12–15 against 73–77 there, on a
+smaller corpus). **Why babble refuses roughly eight times as often is
+untested.** The obvious guess — babble filling the pauses a VAD would skip —
+predicts the wrong sign, because noise usually makes an energy-based detector
+mark *more* frames as speech. Do not write a mechanism into §27 without
+measuring one.
 
-**This is the second attempt.** The first (pid 59676, log
+**This was the second attempt.** The first (pid 59676, log
 `<scratchpad>/extract_pinned.log`) reached the fifth of five blocks and lost
 everything: the machine rebooted at 13:40 on 20 Aug, the log's last line is
 13:27 in `evaluation|amr12.2_babble20dB`, and the script wrote only at the end.
 It now **checkpoints after every batch** to
-`data/reports/neural_embeddings_pinned.checkpoint.npz`, so relaunching the same
-command resumes rather than restarting; `--restart` discards the checkpoint, and
-a checkpoint whose fingerprint (extractor, seed, durations, corpora, split,
-conditions, batch size) does not match is refused rather than resumed. The
-checkpoint is deleted when the final artefact is written, so **its presence
-means the run is unfinished**. Worst case on a crash is one batch, ~15 min.
+`<output>.checkpoint.npz`, so relaunching the same command resumes rather than
+restarting; `--restart` discards the checkpoint, and a checkpoint whose
+fingerprint (extractor, seed, durations, corpora, split, conditions, batch size)
+does not match is refused rather than resumed. Worst case on a crash is one
+batch, ~15 min. The second attempt never needed it, so **the resume path has
+been exercised only by its tests**, not in anger.
 
 **The remaining chain, in order.** Each is a separate heavy job; run one at a
 time.
@@ -189,6 +195,11 @@ python -m scripts.compare_extractors --baseline data/reports/h1_pinned_scores.np
 ```
 
 ~55 min, ~85 min, ~20 min, ~60 min. Then write §27.
+
+**Step 2 is running now** — `train_acoustic`, log
+`<scratchpad>/train_pinned.log`. It does **not** checkpoint; if it dies it
+restarts from nothing, which at ~55 min is a cost worth accepting rather than
+engineering around.
 
 **What this buys, and what it does not.** Everything computed after it is
 comparable to everything else computed after it, forever. It does **not**
