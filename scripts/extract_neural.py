@@ -452,13 +452,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         start_index = 0
         if partial is not None and partial.get("block") == block.name:
             start_index = int(partial["done"])
-            refused = {
-                str(key): int(value) for key, value in partial["refused"].items()
-            }
+            refused = {str(key): int(value) for key, value in partial["refused"].items()}
             resume = restore_block(saved, block.name, block.durations, refused)
             print(
-                f"[{block.name}] resuming at recording "
-                f"{start_index}/{len(block.plans)}",
+                f"[{block.name}] resuming at recording {start_index}/{len(block.plans)}",
                 flush=True,
             )
         else:

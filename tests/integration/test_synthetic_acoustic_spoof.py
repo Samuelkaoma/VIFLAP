@@ -50,9 +50,13 @@ def voiced(seed: int, seconds: float = 1.0) -> np.ndarray:
     time = np.arange(n) / RATE
     signal = np.zeros(n)
     for formant, gain in ((700.0, 1.0), (1220.0, 0.6), (2600.0, 0.3)):
-        signal += gain * np.convolve(
-            excitation, np.exp(-time[:400] * 300) * np.sin(2 * np.pi * formant * time[:400])
-        )[:n]
+        signal += (
+            gain
+            * np.convolve(
+                excitation,
+                np.exp(-time[:400] * 300) * np.sin(2 * np.pi * formant * time[:400]),
+            )[:n]
+        )
     return signal + rng.normal(0.0, 1e-3, n)
 
 
@@ -133,9 +137,7 @@ class _Gate:
 
     def assess(self, recording_id, signal, sample_rate) -> ValidityAssessment:
         score = float(np.max(np.abs(signal)))
-        verdict = (
-            ValidityVerdict.ADMITTED if score > 1.0 else ValidityVerdict.EXCLUDED
-        )
+        verdict = ValidityVerdict.ADMITTED if score > 1.0 else ValidityVerdict.EXCLUDED
         return ValidityAssessment(
             recording_id=recording_id,
             verdict=verdict,
@@ -155,9 +157,7 @@ def incidents_and_binding():
     # Two recordings per operator and three incidents each, so at least one
     # recording is reused -- which is what makes recording ids non-unique.
     bound = {
-        operator.operator_id: [
-            _plan(f"spk{index:03d}", session) for session in range(2)
-        ]
+        operator.operator_id: [_plan(f"spk{index:03d}", session) for session in range(2)]
         for index, operator in enumerate(operators)
     }
     return incidents, bound

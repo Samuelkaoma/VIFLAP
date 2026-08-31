@@ -157,9 +157,7 @@ def run_main(tmp_path, name, *, crash_after=None, extra=()):
     import viflap.infrastructure.neural_extractor as neural_module
 
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(
-            neural_module, "NeuralEmbeddingExtractor", lambda *a, **k: extractor
-        )
+        patch.setattr(neural_module, "NeuralEmbeddingExtractor", lambda *a, **k: extractor)
         status = extract_neural.main(
             [
                 "--corpus",
@@ -331,9 +329,10 @@ def test_a_resumed_run_reproduces_an_uninterrupted_one_exactly(tmp_path):
     assert status == 0
     assert not (tmp_path / "resumed.checkpoint.npz").exists()
 
-    with np.load(tmp_path / "reference.npz") as expected, np.load(
-        tmp_path / "resumed.npz"
-    ) as actual:
+    with (
+        np.load(tmp_path / "reference.npz") as expected,
+        np.load(tmp_path / "resumed.npz") as actual,
+    ):
         assert sorted(expected.files) == sorted(actual.files)
         for key in expected.files:
             np.testing.assert_array_equal(actual[key], expected[key], err_msg=key)
