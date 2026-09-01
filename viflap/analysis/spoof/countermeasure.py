@@ -141,6 +141,15 @@ class TrainingExample:
     cannot be constructed and the only number obtainable is the one that
     overstates performance."""
 
+    speaker_id: str = ""
+    """Who spoke the recording this example derives from.
+
+    Carried for the same reason ``attack_id`` is: without it the cross-attack
+    evaluation can report an equal error rate but not a bootstrap interval,
+    because H7 resamples **speakers** rather than trials. Two examples from one
+    person are not independent evidence about how the detector generalises, and
+    an interval that treats them as though they were is too narrow."""
+
     condition: str = ""
     """Channel condition this example was passed through, where training is
     multi-condition. Used only to calibrate the out-of-domain floor, and for a

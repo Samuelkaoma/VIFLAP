@@ -41,7 +41,7 @@ import json
 import sys
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
@@ -59,7 +59,8 @@ from viflap.analysis.spoof.countermeasure import (
     SpoofingCountermeasure,
     TrainingExample,
 )
-from viflap.domain.errors import InsufficientDataError
+from viflap.domain.errors import CalibrationError, InsufficientDataError
+from viflap.evaluation.hypotheses import H7SyntheticGating
 
 #: Seeds attack generation. Fixed so that a rerun produces the same spoofed
 #: material and the same model.
@@ -149,6 +150,7 @@ def build_examples(
                 sample_rate=recording.sample_rate,
                 is_bona_fide=True,
                 attack_id="none",
+                speaker_id=recording.speaker_id,
             )
         )
         for attack_id in attack_ids:
@@ -168,6 +170,7 @@ def build_examples(
                     sample_rate=recording.sample_rate,
                     is_bona_fide=False,
                     attack_id=attack_id,
+                    speaker_id=recording.speaker_id,
                 )
             )
     return examples
@@ -196,10 +199,17 @@ def split_speakers(
 
 def score_examples(
     countermeasure: SpoofingCountermeasure, examples: Sequence[TrainingExample]
-) -> tuple[NDArray[np.float64], NDArray[np.int64]]:
-    """Score examples, returning the scores and their genuine/spoofed labels."""
+) -> tuple[NDArray[np.float64], NDArray[np.int64], list[str]]:
+    """Score examples, returning scores, genuine/spoofed labels, and speakers.
+
+    The speakers come back alongside because H7 resamples over people rather
+    than over trials, and a refused recording drops all three together -- so
+    building the speaker list separately would silently misalign it with the
+    scores at exactly the recordings the detector could not handle.
+    """
     scores: list[float] = []
     labels: list[int] = []
+    speakers: list[str] = []
     for example in examples:
         try:
             result = countermeasure.score(example.signal, example.sample_rate)
@@ -207,13 +217,14 @@ def score_examples(
             continue
         scores.append(result.log_likelihood_ratio)
         labels.append(1 if example.is_bona_fide else 0)
-    return np.asarray(scores), np.asarray(labels, dtype=np.int64)
+        speakers.append(example.speaker_id)
+    return np.asarray(scores), np.asarray(labels, dtype=np.int64), speakers
 
 
 def evaluate(
     countermeasure: SpoofingCountermeasure, examples: Sequence[TrainingExample]
 ) -> dict[str, float]:
-    scores, labels = score_examples(countermeasure, examples)
+    scores, labels, _ = score_examples(countermeasure, examples)
     if labels.size == 0 or labels.min() == labels.max():
         return {"equal_error_rate": float("nan"), "n_scored": float(labels.size)}
     return {
@@ -264,6 +275,7 @@ def degrade_examples(
                 sample_rate=example.sample_rate,
                 is_bona_fide=example.is_bona_fide,
                 attack_id=example.attack_id,
+                speaker_id=example.speaker_id,
                 # Carried so the out-of-domain floor can be calibrated as a
                 # union over conditions rather than a percentile of their
                 # mixture. Without the label the floor silently reverts to the
@@ -287,6 +299,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--max-recordings", type=int, default=None)
     parser.add_argument("--evaluation-fraction", type=float, default=0.34)
     parser.add_argument("--seed", type=int, default=ATTACK_SEED)
+    parser.add_argument(
+        "--h7-resamples",
+        type=int,
+        default=1000,
+        help="bootstrap resamples for the H7 interval on each held-out family",
+    )
     parser.add_argument(
         "--train-corpus",
         type=Path,
@@ -389,6 +407,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # -- Unseen attacks: the number that describes deployment -------------
     cross: dict[str, dict[str, float]] = {}
+    h7: dict[str, dict[str, object]] = {}
     for held_out in attack_ids:
         remaining = [a for a in attack_ids if a != held_out]
         subset = [e for e in train_examples if e.is_bona_fide or e.attack_id in remaining]
@@ -399,6 +418,32 @@ def main(argv: Sequence[str] | None = None) -> int:
         model = SpoofingCountermeasure.train(subset, config)
         cross[held_out] = evaluate(model, held_examples)
         print(f"  EER on unseen {held_out}: {cross[held_out]['equal_error_rate']:.2%}")
+
+        # H7 asks a different question from the EER beside it: not where the
+        # error curves cross, but whether the detector's log-likelihood ratios
+        # are good enough to gate evidence, with an interval over speakers.
+        # Run per held-out family rather than pooling the four. Pooling would
+        # repeat every genuine example once per retrained model and score it
+        # under four different detectors, which is neither one measurement nor
+        # four independent ones.
+        scores, labels, speakers = score_examples(model, held_examples)
+        try:
+            outcome = H7SyntheticGating().run(
+                scores,
+                labels,
+                speakers,
+                [held_out],
+                n_resamples=arguments.h7_resamples,
+            )
+        except (InsufficientDataError, CalibrationError) as error:
+            h7[held_out] = {"error": f"{type(error).__name__}: {error}"}
+        else:
+            h7[held_out] = asdict(outcome)
+            print(
+                f"  H7 on unseen {held_out}: C_llr {outcome.estimate.value:.3f} "
+                f"[{outcome.estimate.lower:.3f}, {outcome.estimate.upper:.3f}] "
+                f"-> {'supported' if outcome.supported else 'falsified' if outcome.falsified else 'inconclusive'}"
+            )
 
     rates = [
         v["equal_error_rate"] for v in cross.values() if np.isfinite(v["equal_error_rate"])
@@ -414,6 +459,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "training_summary": full.training_summary,
         "seen_attacks": seen,
         "unseen_attacks": cross,
+        "h7": h7,
         "mean_unseen_attack_eer": float(np.mean(rates)) if rates else float("nan"),
         "generalisation_gap": (
             float(np.mean(rates) - seen["equal_error_rate"]) if rates else float("nan")
