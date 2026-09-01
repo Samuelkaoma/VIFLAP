@@ -45,13 +45,27 @@ powershell -Command "Get-CimInstance Win32_Process -Filter 'Name=\"python.exe\"'
 
 | | |
 |---|---|
-| Tests | **817, all passing** (~7 min) |
-| ruff | clean (`viflap scripts tests`) |
-| mypy | **63 errors on `viflap`** — pre-existing baseline, not a regression |
+| Tests | **832, all passing** (~33 min cold, ~7 min warm) |
+| ruff | `check` **and** `format --check` clean (`viflap tests scripts`) |
+| mypy | **0 on `viflap`** — was 63; see below |
 | Git | clean, all pushed, `main` |
 
 Always scope mypy to `viflap`. `mypy .` pulls in tests/ and scripts/ and reports
-a different number that is not the baseline.
+a different number.
+
+**The old "63 is the baseline" note was wrong about what CI wants**, and is
+recorded here rather than deleted because it is why CI was red for weeks.
+`ci.yml` runs five checks on every push to `main`: `pytest tests/architecture`,
+`pytest`, `ruff check`, **`ruff format --check`** and **`mypy viflap`** — the
+last two expecting a clean exit, which a 63-error baseline can never give. The
+standard in §7 said "keep ruff green and mypy at 63", so every session that
+followed it faithfully still pushed red. Both are now genuinely clean: 23 of the
+63 were real and are fixed, and 40 were numpy 2.x erasing `NDArray.shape` to
+`tuple[Any, ...]` under `warn_return_any`, which is now disabled for twelve
+named numpy-backed modules and on everywhere else. The minimal repro is in
+`pyproject.toml` beside the override.
+
+**Run what CI runs before pushing, not what the standard says.**
 
 **Repo is now PUBLIC.** Consequences: Actions minutes are unmetered, and Colab
 or Kaggle can clone without a token.
@@ -515,6 +529,65 @@ re-deriving. Each is measured, and several are negative results.
    embedding-space confidence — nearest-neighbour density, or the norm before
    length normalisation — might abstain better than a duration rule. Nothing
    here measures whether it would.
+
+### Beyond H1: what the other hypotheses actually need
+
+Everything in this document so far is **H1**. The proposal states seven
+hypotheses and `viflap/evaluation/hypotheses.py` implements six of them as
+decision rules — H1 to H5 and H7; **there is no H6 anywhere in the code**, and
+whether that is a renumbering or an omission has not been checked against the
+proposal. The README's summary line is the honest one: one hypothesis has been
+tested on real speech.
+
+Surveyed this session by reading the decision rules rather than guessing at
+them. Two are reachable and three are not.
+
+**H7 (synthetic gating) is reachable, and likely to come back negative.**
+`H7SyntheticGating.run` needs `detector_scores`, `labels`, `speakers` and
+`held_out_attacks`, and is supported only if the **upper bound of `C_llr` on
+held-out attacks** is at most 0.40. The leave-one-family-out machinery already
+exists — `countermeasure_union.json` carries unseen EERs of 18.03%, 9.29%,
+48.63% and 41.53% — so the retraining half is done. What is missing is small
+and specific: `TrainingExample` carries `attack_id` and `condition` but **no
+`speaker_id`**, and `bootstrap_over_speakers` cannot run without one, so the
+field has to be threaded through `train_countermeasure` and the per-trial
+scores persisted. Expect this to **falsify or leave inconclusive** rather than
+support: a detector at 48.63% EER on `oversmoothed` is at chance, and §10
+established it is *structurally* blind to `phase_randomised`. A negative here is
+a real result and the decision rule was fixed in advance.
+
+**H2 (disguise resistance) is reachable, and nobody seems to have noticed.**
+`H2DisguiseResistance.run` wants `by_feature_class` — discriminative scores per
+feature class — and asks whether anatomically constrained classes degrade less
+than globally spectral and F0-derived ones. **Every feature class it needs is
+already implemented**: `viflap/analysis/dsp/nasality.py`, `pitch.py`,
+`spectral.py` and `voice_quality.py`. What is missing is disguised speech, and
+that is obtainable the way §24 obtained spoofed speech — parametrically, from
+the corpus already on disk. Pitch shift, formant shift and whisperisation are
+**electronic disguise**, a recognised category in forensic phonetics and a
+different thing from a human deliberately altering their voice. It would have
+to be labelled as such everywhere it is quoted, exactly as §24 labels its
+attacks vocoder-class. Modelled on `viflap/analysis/spoof/attacks.py`, which is
+the right precedent for both the structure and the caveat.
+
+**H3, H4 and H5 need data that does not exist here.**
+
+- **H3 (disguise decay)** asks whether a disguise degrades over the course of a
+  call. A parametric disguise does not decay — that is exactly what makes it
+  parametric — so this cannot be simulated honestly. It needs humans sustaining
+  a disguise over minutes.
+- **H4 (cross-lingual penalty)** needs code-switched Zambian speech. §8 closed
+  this: AfriSpeech-200 has 2,463 speakers and **zero** from Zambia. Blocked
+  until a corpus exists.
+- **H5 (fusion superiority)** has been *exercised* by §11 but on simulated
+  incidents, and those artefacts say plainly that no figure from them is a
+  result. The methodological finding — that dependence modelling loses to
+  calibrated independence, and by more on a strong marginal — stands on its own
+  terms. A real H5 needs real behavioural and transactional data.
+
+So the realistic ceiling without new data is **three of six measured**: H1 done,
+H7 measured and probably falsified, H2 measured under electronic disguise. That
+is worth stating plainly rather than discovering three sessions from now.
 
 ### Blocked on the user
 
