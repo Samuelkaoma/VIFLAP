@@ -15,6 +15,8 @@ must produce the *same model*, not merely a similar one.
 
 from __future__ import annotations
 
+import hashlib
+
 import numpy as np
 import pytest
 from numpy.typing import NDArray
@@ -272,8 +274,21 @@ class TestTheOutOfDomainFloorIsAUnion:
     """
 
     @staticmethod
-    def _examples(condition: str, offset: float, n: int = 6) -> list[TrainingExample]:
-        rng = np.random.default_rng(abs(hash(condition)) % 1000)
+    def _examples(condition: str, offset: float, n: int = 12) -> list[TrainingExample]:
+        # Seeded from a content hash, never the built-in one: string hashing is
+        # salted per interpreter, so this fixture drew different noise on every
+        # run and the union-floor test below passed or failed accordingly. It
+        # failed under PYTHONHASHSEED=11 and passed under 0-10.
+        #
+        # Twelve per condition rather than six, and that is the substantive half
+        # of the fix. The union floor is below the pooled one because the
+        # mixture's percentile is pulled up by the condition it does not sit in,
+        # which is an argument about distributions and not about six samples. A
+        # sweep over twelve draws found the ordering inverting once in twelve at
+        # n = 6 and never at n = 12 or n = 24. The claim is asymptotic; testing
+        # it at the sample size where it is a coin flip tested nothing.
+        digest = hashlib.sha256(condition.encode()).digest()
+        rng = np.random.default_rng(int.from_bytes(digest[:4], "big"))
         out = []
         for i in range(n):
             # Four seconds: below roughly three the feature matrix falls
