@@ -46,12 +46,8 @@ def two_systems():
     owners = {k: f"spk{i % N_OWNERS:02d}" for i, k in enumerate(keys)}
     # The variant separates the classes better, which is the thing the paired
     # difference should detect.
-    baseline_scores = {
-        k: float(rng.normal(2.0 if labels[k] else -2.0, 3.0)) for k in keys
-    }
-    variant_scores = {
-        k: float(rng.normal(4.0 if labels[k] else -4.0, 1.5)) for k in keys
-    }
+    baseline_scores = {k: float(rng.normal(2.0 if labels[k] else -2.0, 3.0)) for k in keys}
+    variant_scores = {k: float(rng.normal(4.0 if labels[k] else -4.0, 1.5)) for k in keys}
 
     forward = list(range(300))
     shuffled = list(rng.permutation(300))
@@ -134,14 +130,9 @@ class TestTheJoin:
         keys = [str(k) for k in variant["pairs"]]
         reordered = {
             "pairs": np.array(sorted(keys), dtype=np.str_),
-            "scores": np.array(
-                [variant_scores[k] for k in sorted(keys)], dtype=np.float64
-            ),
+            "scores": np.array([variant_scores[k] for k in sorted(keys)], dtype=np.float64),
             "labels": np.array(
-                [
-                    int(variant["labels"][keys.index(k)])
-                    for k in sorted(keys)
-                ],
+                [int(variant["labels"][keys.index(k)]) for k in sorted(keys)],
                 dtype=np.int64,
             ),
             "owners": np.array(
@@ -156,9 +147,7 @@ class TestTheJoin:
 
 
 class TestPartialOverlap:
-    def test_only_the_intersection_is_paired_and_it_is_recorded(
-        self, two_systems
-    ) -> None:
+    def test_only_the_intersection_is_paired_and_it_is_recorded(self, two_systems) -> None:
         """The five-second case: the baseline front-end refused some recordings.
 
         Pairing the intersection is what ``paired_bootstrap_over_speakers``
@@ -214,7 +203,5 @@ def _cllr_min_of(scores, keys, baseline):
     from viflap.analysis.calibration.metrics import compute_cllr_min
 
     order = {str(k): i for i, k in enumerate(baseline["pairs"])}
-    labels = np.array(
-        [int(baseline["labels"][order[k]]) for k in keys], dtype=np.int64
-    )
+    labels = np.array([int(baseline["labels"][order[k]]) for k in keys], dtype=np.int64)
     return compute_cllr_min(scores, labels)

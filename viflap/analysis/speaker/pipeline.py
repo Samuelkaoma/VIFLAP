@@ -29,6 +29,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -842,26 +843,26 @@ def _config_from_dict(payload: dict[str, object]) -> SpeakerSystemConfig:
     from viflap.analysis.dsp.spectral import FilterbankScale
 
     frame = FrameConfig(
-        sample_rate=int(payload["sample_rate"]),  # type: ignore[arg-type]
-        frame_length_ms=float(payload["frame_length_ms"]),  # type: ignore[arg-type]
-        frame_shift_ms=float(payload["frame_shift_ms"]),  # type: ignore[arg-type]
+        sample_rate=int(cast(float, payload["sample_rate"])),
+        frame_length_ms=float(cast(float, payload["frame_length_ms"])),
+        frame_shift_ms=float(cast(float, payload["frame_shift_ms"])),
         window=WindowType(payload["window"]),
-        pre_emphasis=float(payload["pre_emphasis"]),  # type: ignore[arg-type]
+        pre_emphasis=float(cast(float, payload["pre_emphasis"])),
     )
     cepstral = CepstralConfig(
-        n_filters=int(payload["n_filters"]),  # type: ignore[arg-type]
-        n_cepstra=int(payload["n_cepstra"]),  # type: ignore[arg-type]
+        n_filters=int(cast(float, payload["n_filters"])),
+        n_cepstra=int(cast(float, payload["n_cepstra"])),
         scale=FilterbankScale(payload["filterbank_scale"]),
-        low_hz=float(payload["low_hz"]),  # type: ignore[arg-type]
-        high_hz=float(payload["high_hz"]),  # type: ignore[arg-type]
-        lifter=float(payload["lifter"]),  # type: ignore[arg-type]
+        low_hz=float(cast(float, payload["low_hz"])),
+        high_hz=float(cast(float, payload["high_hz"])),
+        lifter=float(cast(float, payload["lifter"])),
     )
     front_end = FrontEndConfig(
         frame=frame,
         cepstral=cepstral,
-        delta_order=int(payload["delta_order"]),  # type: ignore[arg-type]
-        delta_window=int(payload["delta_window"]),  # type: ignore[arg-type]
-        sliding_cmvn_frames=int(payload["sliding_cmvn_frames"]),  # type: ignore[arg-type]
-        min_speech_seconds=float(payload["min_speech_seconds"]),  # type: ignore[arg-type]
+        delta_order=int(cast(float, payload["delta_order"])),
+        delta_window=int(cast(float, payload["delta_window"])),
+        sliding_cmvn_frames=int(cast(float, payload["sliding_cmvn_frames"])),
+        min_speech_seconds=float(cast(float, payload["min_speech_seconds"])),
     )
     return SpeakerSystemConfig(front_end=front_end)

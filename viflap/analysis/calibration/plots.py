@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -36,7 +37,7 @@ __all__ = ["reliability_plot", "tippett_plot"]
 _LN10 = math.log(10.0)
 
 
-def _figure(figsize: tuple[float, float]):
+def _figure(figsize: tuple[float, float]) -> Any:
     """Create a figure without requiring an interactive backend.
 
     ``matplotlib`` is imported here rather than at module scope: this package is
@@ -57,7 +58,7 @@ def tippett_plot(
     title: str = "Tippett plot",
     *,
     comparisons: Mapping[str, tuple[NDArray[np.float64], NDArray[np.int64]]] | None = None,
-):
+) -> Any:
     """Cumulative likelihood-ratio distributions by trial type.
 
     The same-source curve shows the proportion of same-source trials with
@@ -118,7 +119,7 @@ def tippett_plot(
 
 
 def _draw_tippett_pair(
-    axes,
+    axes: Any,
     same: NDArray[np.float64],
     different: NDArray[np.float64],
     label_prefix: str,
@@ -156,7 +157,7 @@ def reliability_plot(
     log_lrs: NDArray[np.float64],
     labels: NDArray[np.int64],
     title: str = "Calibration reliability",
-):
+) -> Any:
     """Reported likelihood ratio against the optimally calibrated one.
 
     The horizontal axis is what the system said; the vertical is what an

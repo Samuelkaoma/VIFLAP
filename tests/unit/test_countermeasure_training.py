@@ -258,7 +258,7 @@ class TestMultiConditionTraining:
 
 
 class TestTheOutOfDomainFloorIsAUnion:
-    """"Unlike anything in training" is a union, not a percentile of a blend.
+    """ "Unlike anything in training" is a union, not a percentile of a blend.
 
     §24 measured what the difference costs. With a floor taken over the pooled
     mixture of eight conditions, the out-of-domain fraction ran 0.352 on the

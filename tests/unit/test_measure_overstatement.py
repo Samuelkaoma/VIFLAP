@@ -81,12 +81,8 @@ class TestMarginalResampling:
 
     def test_different_seeds_give_different_replicates(self) -> None:
         log_lrs, labels, speakers = self._fixture()
-        first, _ = resample_marginal(
-            log_lrs, labels, speakers, np.random.default_rng(1)
-        )
-        second, _ = resample_marginal(
-            log_lrs, labels, speakers, np.random.default_rng(2)
-        )
+        first, _ = resample_marginal(log_lrs, labels, speakers, np.random.default_rng(1))
+        second, _ = resample_marginal(log_lrs, labels, speakers, np.random.default_rng(2))
         assert not np.array_equal(np.sort(first), np.sort(second))
 
     def test_resampling_is_reproducible_for_one_seed(self) -> None:
@@ -120,9 +116,7 @@ class TestTheCopulaArm:
         report the correctly-specified result under a different name."""
         same, different = marginal
         with pytest.raises(ValueError, match="unknown copula"):
-            simulate(
-                same, different, 0.5, 10, np.random.default_rng(0), copula="clayton"
-            )
+            simulate(same, different, 0.5, 10, np.random.default_rng(0), copula="clayton")
 
     def test_both_copulas_preserve_the_measured_marginal(self, marginal) -> None:
         """A copula changes the dependence and must not touch the marginals.
@@ -144,6 +138,7 @@ class TestTheCopulaArm:
         tail dependence disappears, which would make this arm an expensive
         no-op that still produced plausible numbers.
         """
+
         def joint_tail_rate(copula: str) -> float:
             matrix = self._streams_matrix(copula, 0.5, 21, marginal)
             thresholds = np.percentile(matrix, 90, axis=0)
@@ -153,11 +148,10 @@ class TestTheCopulaArm:
         t_rate = joint_tail_rate("t")
         assert t_rate > gaussian_rate, (gaussian_rate, t_rate)
 
-    def test_the_two_copulas_impose_a_similar_linear_correlation(
-        self, marginal
-    ) -> None:
+    def test_the_two_copulas_impose_a_similar_linear_correlation(self, marginal) -> None:
         """Otherwise the t arm would differ in strength of dependence as well as
         in its shape, and the comparison would confound the two."""
+
         def mean_correlation(copula: str) -> float:
             matrix = self._streams_matrix(copula, 0.6, 33, marginal)
             corr = np.corrcoef(matrix, rowvar=False)
@@ -235,9 +229,7 @@ class TestStreamStrengthIsNotStreamQuality:
         from viflap.analysis.calibration.metrics import compute_cllr, compute_cllr_min
 
         rng = np.random.default_rng(0)
-        scores = np.concatenate(
-            [rng.normal(2.2, 2.1, 2000), rng.normal(-3.9, 2.3, 20000)]
-        )
+        scores = np.concatenate([rng.normal(2.2, 2.1, 2000), rng.normal(-3.9, 2.3, 20000)])
         labels = np.concatenate([np.ones(2000), np.zeros(20000)]).astype(np.int64)
 
         baseline_min = compute_cllr_min(scores, labels)
@@ -247,9 +239,7 @@ class TestStreamStrengthIsNotStreamQuality:
             assert compute_cllr_min(scaled, labels) == pytest.approx(baseline_min)
             assert compute_cllr(scaled, labels) != pytest.approx(baseline_cllr)
 
-    def test_a_fitted_linear_fusion_absorbs_the_scaling_exactly(
-        self, marginal
-    ) -> None:
+    def test_a_fitted_linear_fusion_absorbs_the_scaling_exactly(self, marginal) -> None:
         """``w0 + sum wi*li`` under ``li -> si*li`` is the same model at
         ``wi/si``, so refitting recovers it and the constant cannot reach the
         result.
@@ -300,12 +290,8 @@ class TestStreamStrengthIsNotStreamQuality:
             }
         )
         try:
-            training = mo.simulate(
-                same, different, 0.4, 1200, np.random.default_rng(3)
-            )
-            evaluation = mo.simulate(
-                same, different, 0.4, 1200, np.random.default_rng(4)
-            )
+            training = mo.simulate(same, different, 0.4, 1200, np.random.default_rng(3))
+            evaluation = mo.simulate(same, different, 0.4, 1200, np.random.default_rng(4))
             model = model_class()
             fitted = model.fit(training) if hasattr(model, "fit") else model
             return mo._fused_cllr(fitted, evaluation)
@@ -330,16 +316,14 @@ class TestWeakeningAStreamProperly:
         from viflap.analysis.calibration.metrics import compute_cllr_min
 
         same, different = marginal
-        labels = np.concatenate(
-            [np.ones(same.size), np.zeros(different.size)]
-        ).astype(np.int64)
+        labels = np.concatenate([np.ones(same.size), np.zeros(different.size)]).astype(
+            np.int64
+        )
 
         costs = []
         for factor in (1.0, 0.7, 0.4):
             weakened = weaken(same, different, factor)
-            costs.append(
-                compute_cllr_min(np.concatenate([weakened, different]), labels)
-            )
+            costs.append(compute_cllr_min(np.concatenate([weakened, different]), labels))
         assert costs[0] < costs[1] < costs[2], costs
 
     def test_one_leaves_the_marginal_untouched(self, marginal) -> None:

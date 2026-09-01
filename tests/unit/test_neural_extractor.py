@@ -141,9 +141,7 @@ class TestTheSpeechGate:
         cleared a three-second bar comfortably; it should not.
         """
         rate = 16000
-        signal = np.concatenate(
-            [self._speech(1.0, rate), np.zeros(9 * rate)]
-        )
+        signal = np.concatenate([self._speech(1.0, rate), np.zeros(9 * rate)])
         assert signal.size / rate == pytest.approx(10.0)
         with pytest.raises(InsufficientDataError):
             assert_sufficient_speech(signal, rate, NeuralEmbeddingConfig())

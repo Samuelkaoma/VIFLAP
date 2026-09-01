@@ -438,11 +438,7 @@ def split_by_speaker(
     # the drawn part of evaluation into the pinned part rather than adding to it.
     n_eval = max(int(round(n_total * evaluation_fraction)) - len(reserved), 0)
     n_dev = int(round(n_total * development_fraction))
-    if (
-        len(reserved) + n_eval < 3
-        or n_dev < 3
-        or len(shuffled) - n_eval - n_dev < 1
-    ):
+    if len(reserved) + n_eval < 3 or n_dev < 3 or len(shuffled) - n_eval - n_dev < 1:
         raise ValueError(
             f"corpus has too few speakers ({n_total}) to form a three-way "
             f"speaker-disjoint split with usable development and evaluation parts"

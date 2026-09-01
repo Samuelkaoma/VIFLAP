@@ -186,16 +186,12 @@ def spoof(
     spoofed: list[Recording | None] = []
     failures: list[str] = []
     for recording in recordings:
-        digest = hashlib.sha256(
-            f"{recording.recording_id}:{attack_id}".encode()
-        ).digest()
+        digest = hashlib.sha256(f"{recording.recording_id}:{attack_id}".encode()).digest()
         rng = np.random.default_rng(
             EVALUATION_ATTACK_SEED + int.from_bytes(digest[:4], "big")
         )
         try:
-            signal = apply_attack(
-                attack_id, recording.signal, recording.sample_rate, rng
-            )
+            signal = apply_attack(attack_id, recording.signal, recording.sample_rate, rng)
         except (ConvergenceError, InsufficientDataError, InvalidEvidenceError) as error:
             failures.append(f"{recording.recording_id}: {type(error).__name__}")
             spoofed.append(None)
@@ -264,9 +260,7 @@ def summarise(evidence: Mapping[str, AcousticEvidence]) -> dict[str, object]:
     for item in evidence.values():
         name = item.validity.verdict.value
         verdicts[name] = verdicts.get(name, 0) + 1
-    scores = np.array(
-        [item.validity.countermeasure_log_lr for item in evidence.values()]
-    )
+    scores = np.array([item.validity.countermeasure_log_lr for item in evidence.values()])
     thresholds = evidence and next(iter(evidence.values())).validity.threshold
     return {
         "n_incidents_with_audio": len(evidence),
@@ -320,9 +314,7 @@ def summarise_arm(
     }
 
 
-def load_corpus(
-    roots: Sequence[Path], target_seconds: float = 30.0
-) -> list[RecordingPlan]:
+def load_corpus(roots: Sequence[Path], target_seconds: float = 30.0) -> list[RecordingPlan]:
     """Evaluation-partition plans only.
 
     The acoustic model was trained on the training partition, so binding

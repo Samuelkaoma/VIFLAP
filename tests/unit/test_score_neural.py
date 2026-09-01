@@ -50,8 +50,10 @@ def _cell(seed: int, separation: float):
             vectors.append(centre + rng.normal(0.0, 1.0, DIMENSION))
             speakers.append(f"spk{speaker:03d}")
             recordings.append(f"spk{speaker:03d}-{session}-r0")
-    return np.stack(vectors), np.array(speakers, dtype=np.str_), np.array(
-        recordings, dtype=np.str_
+    return (
+        np.stack(vectors),
+        np.array(speakers, dtype=np.str_),
+        np.array(recordings, dtype=np.str_),
     )
 
 
@@ -148,9 +150,7 @@ class TestTrialFormation:
             [int(name.removeprefix("spk")) for name in speakers], dtype=np.int64
         )
         transform = fit_transform_chain(vectors, labels)
-        plda = train_plda(
-            transform.apply(vectors), labels, PldaConfig(max_iterations=10)
-        )
+        plda = train_plda(transform.apply(vectors), labels, PldaConfig(max_iterations=10))
         return build_trials(vectors, list(speakers), list(recordings), plda, transform)
 
     def test_same_source_trials_never_share_a_session(self) -> None:
@@ -191,9 +191,7 @@ class TestTrialFormation:
             [int(name.removeprefix("spk")) for name in speakers], dtype=np.int64
         )
         transform = fit_transform_chain(vectors, labels)
-        plda = train_plda(
-            transform.apply(vectors), labels, PldaConfig(max_iterations=10)
-        )
+        plda = train_plda(transform.apply(vectors), labels, PldaConfig(max_iterations=10))
         with pytest.raises(InsufficientDataError):
             build_trials(
                 vectors[:1], list(speakers[:1]), list(recordings[:1]), plda, transform
@@ -217,14 +215,10 @@ class TestTheReport:
         coincidentally matching.
         """
         for cell in report["cells"]:
-            expected = int(cell["duration_seconds"]) + (
-                cell["condition"] == CONDITIONS[1]
-            )
+            expected = int(cell["duration_seconds"]) + (cell["condition"] == CONDITIONS[1])
             assert cell["n_refused"] == expected, cell["condition"]
 
-    def test_each_cell_carries_an_interval_containing_its_estimate(
-        self, report
-    ) -> None:
+    def test_each_cell_carries_an_interval_containing_its_estimate(self, report) -> None:
         for cell in report["cells"]:
             assert cell["c_llr_min_lower"] <= cell["c_llr_min"] <= cell["c_llr_min_upper"]
 

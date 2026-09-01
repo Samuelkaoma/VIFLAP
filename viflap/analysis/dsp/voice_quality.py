@@ -203,7 +203,7 @@ def measure_voice_quality(
 
 def _place_period_marks(
     signal: NDArray[np.float64], f0_track: F0Track, voiced: NDArray[np.bool_]
-) -> list[tuple[NDArray[np.int64], NDArray[np.float64]]]:
+) -> list[tuple[NDArray[np.float64], NDArray[np.float64]]]:
     """Locate one amplitude peak per glottal period, grouped into voiced runs.
 
     Marks are placed by **waveform cross-correlation**, pitch-synchronously.

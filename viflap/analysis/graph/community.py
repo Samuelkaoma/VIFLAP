@@ -213,6 +213,16 @@ def detect_communities(
     )
 
 
+def _pair(first: str, second: str) -> tuple[str, str]:
+    """The unordered pair as the Counter keys it.
+
+    ``tuple(sorted(...))`` is ``tuple[str, ...]`` to a type checker even
+    though it is always exactly two elements here, and the Counter is keyed
+    on a two-tuple. Naming the pair keeps the key type honest.
+    """
+    return (first, second) if first <= second else (second, first)
+
+
 def _stability_of(
     node: str,
     final_labels: Mapping[str, int],
@@ -228,7 +238,7 @@ def _stability_of(
     if not companions:
         return 1.0
     rates = [
-        co_membership.get(tuple(sorted((node, other))), 0) / max(n_resamples, 1)
+        co_membership.get(_pair(node, other), 0) / max(n_resamples, 1)
         for other in companions
     ]
     return float(np.mean(rates))

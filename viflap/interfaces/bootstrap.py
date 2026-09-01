@@ -26,7 +26,7 @@ from pathlib import Path
 
 from viflap.application.comparison import CompareIncidents
 from viflap.application.ingestion import IngestIncident
-from viflap.application.ports import StreamComparator
+from viflap.application.ports import EvidenceBundle, StreamComparator
 from viflap.application.search import SearchDatabase
 from viflap.domain.errors import ConfigurationError
 from viflap.domain.evidence import EvidenceStream
@@ -116,7 +116,9 @@ def build_demonstration_container(audit_path: Path | str) -> ApplicationContaine
     from viflap.infrastructure.comparators import CalibratedStreamComparator
 
     class _UnfittedComparator(CalibratedStreamComparator):
-        def _score(self, first, second):  # pragma: no cover - never reached
+        def _score(
+            self, first: EvidenceBundle, second: EvidenceBundle
+        ) -> tuple[float, Mapping[str, float]]:  # pragma: no cover - never reached
             raise AssertionError("an unfitted comparator must refuse before scoring")
 
     comparators = [
@@ -125,7 +127,7 @@ def build_demonstration_container(audit_path: Path | str) -> ApplicationContaine
     ]
 
     class _UnfittedFusion(FittedFusionProvider):
-        def supports_pattern(self, pattern):
+        def supports_pattern(self, pattern: object) -> bool:
             return bool(pattern)
 
     fusion = _UnfittedFusion(LinearLogisticFusion())

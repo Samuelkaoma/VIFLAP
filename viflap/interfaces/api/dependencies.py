@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, Protocol
+from typing import Annotated, Protocol, cast
 
 from fastapi import Depends, Header, Request
 
@@ -140,7 +140,9 @@ def get_container(request: Request) -> ApplicationContainer:
             "the application container was not installed; build the app with "
             "create_app(container=...)"
         )
-    return container
+    # ``app.state`` is untyped, so what comes back is Any. The None check
+    # above is what actually establishes the type; the cast records it.
+    return cast(ApplicationContainer, container)
 
 
 def resolve_principal(

@@ -327,8 +327,7 @@ def _draw_operation(
         rng.choice(HANDSET_MODELS, size=int(rng.integers(1, 4)), replace=False).tolist()
     )
     imei_pool = tuple(
-        f"35{int(rng.integers(10**12, 10**13 - 1))}"
-        for _ in range(int(rng.integers(3, 8)))
+        f"35{int(rng.integers(10**12, 10**13 - 1))}" for _ in range(int(rng.integers(3, 8)))
     )
     # One model per handset, fixed here rather than redrawn per incident. A
     # corpus in which one IMEI reports several models would let the device
@@ -419,9 +418,7 @@ def _utterance(rng: np.random.Generator, operator: Operator, move: str) -> str:
     return " ".join(out)
 
 
-def _transcript(
-    rng: np.random.Generator, operator: Operator, operation: Operation
-) -> str:
+def _transcript(rng: np.random.Generator, operator: Operator, operation: Operation) -> str:
     """A whole call: every move once, then more turns until it is call-length.
 
     A nine-move script at one turn per move ran to about a hundred words, which
@@ -465,9 +462,7 @@ def _draw_calls(
     same operation. Grounding for that preference is thin — see
     ``operator_shift_hour`` in :data:`PARAMETER_PROVENANCE`.
     """
-    calls = [
-        CallDetail(timestamp=started.isoformat(), duration_seconds=round(duration, 1))
-    ]
+    calls = [CallDetail(timestamp=started.isoformat(), duration_seconds=round(duration, 1))]
     for _ in range(int(rng.integers(3, 9))):
         hour = (operator.shift_start_hour + int(rng.integers(0, 4))) % 24
         stamp = started.replace(hour=hour, minute=int(rng.integers(0, 60))) + timedelta(

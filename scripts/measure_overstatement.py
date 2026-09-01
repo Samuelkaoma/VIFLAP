@@ -266,8 +266,7 @@ def simulate(
     shared = rng.standard_normal(n_incidents)
     idiosyncratic = rng.standard_normal((n_incidents, len(_STREAMS)))
     combined = (
-        np.sqrt(correlation) * shared[:, None]
-        + np.sqrt(1.0 - correlation) * idiosyncratic
+        np.sqrt(correlation) * shared[:, None] + np.sqrt(1.0 - correlation) * idiosyncratic
     )
 
     if copula == "t":
@@ -380,17 +379,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     print(
         f"  {arguments.replicates} replicates, {arguments.copula} copula"
-        + (
-            ""
-            if arguments.no_resample_marginal
-            else ", marginal resampled over speakers"
-        ),
+        + ("" if arguments.no_resample_marginal else ", marginal resampled over speakers"),
         flush=True,
     )
 
-    discriminability = {
-        EvidenceStream.BEHAVIOURAL: arguments.behavioural_discriminability
-    }
+    discriminability = {EvidenceStream.BEHAVIOURAL: arguments.behavioural_discriminability}
     results: list[dict[str, object]] = []
     for correlation in arguments.correlations:
         per_replicate: dict[str, list[float]] = {

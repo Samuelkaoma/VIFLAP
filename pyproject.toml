@@ -204,6 +204,42 @@ module = ["scipy.*", "matplotlib.*", "hypothesis.*", "speechbrain.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+# ``warn_return_any`` against numpy 2.x, not against this code.
+#
+# ``NDArray[np.float64]`` is ``ndarray[tuple[Any, ...], dtype[float64]]`` under
+# numpy's shape generics, so ``.shape`` is ``tuple[Any, ...]`` and ``.shape[i]``
+# is ``Any``. Several reductions (``np.sum(a, axis=1)``) erase the same way.
+# Every site this fires on already carries a correct explicit return annotation;
+# the checker simply cannot see through the stub. Reproduced in ten lines:
+#
+#     def dim(a: NDArray[np.float64]) -> int:
+#         return a.shape[1]          # no-any-return
+#     def total(a: NDArray[np.float64]) -> NDArray[np.float64]:
+#         return np.sum(a, axis=1)   # no-any-return
+#
+# The alternative was forty ``cast`` calls through the numerical core, which
+# would add noise to the code every reported number comes out of while
+# asserting exactly what the annotations already say. The flag stays on
+# everywhere else, and the module list is explicit so that a new file has to be
+# added deliberately rather than inheriting the exemption from a wildcard.
+# Revisit when numpy's stubs carry concrete shape types.
+module = [
+    "viflap.analysis.calibration.calibrators",
+    "viflap.analysis.calibration.pav",
+    "viflap.analysis.channel.codec",
+    "viflap.analysis.channel.degradation",
+    "viflap.analysis.dsp.lpc",
+    "viflap.analysis.dsp.spectral",
+    "viflap.analysis.dsp.vad",
+    "viflap.analysis.fusion.models",
+    "viflap.analysis.speaker.gmm",
+    "viflap.analysis.speaker.ivector",
+    "viflap.analysis.speaker.plda",
+    "viflap.analysis.speaker.transforms",
+]
+warn_return_any = false
+
+[[tool.mypy.overrides]]
 # Tests exercise deliberately invalid inputs to assert that they are refused,
 # which requires passing types the signatures reject.
 module = "tests.*"

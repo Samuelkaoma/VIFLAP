@@ -22,8 +22,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from viflap.application.ports import (
+    ComparisonResultRepository,
     EvidenceBundle,
+    EvidenceRepository,
     IncidentRecord,
+    IncidentRepository,
 )
 from viflap.domain.errors import EntityNotFoundError, RepositoryError
 from viflap.domain.governance import CaseReference
@@ -126,7 +129,7 @@ class InMemoryEvidenceRepository:
 
     # The port names this ``store``; the attribute name above avoids shadowing
     # the constructor argument while keeping the port satisfied.
-    store = store_bundle  # type: ignore[assignment]
+    store = store_bundle
 
     def load(self, incident_id: IncidentId) -> EvidenceBundle:
         key = incident_id.value
@@ -201,9 +204,21 @@ class InMemoryUnitOfWork:
 
     def __init__(self, store: InMemoryStore | None = None) -> None:
         self._store = store if store is not None else InMemoryStore()
-        self.incidents = InMemoryIncidentRepository(self._store)
-        self.evidence = InMemoryEvidenceRepository(self._store)
-        self.results = InMemoryComparisonResultRepository(self._store)
+        # Annotated with the port types, not the concrete ones. ``UnitOfWork``
+        # declares these as mutable attributes, and a protocol's mutable
+        # attributes are invariant: a narrower type here means this class
+        # silently stops satisfying the port it exists to implement.
+        self._incidents = InMemoryIncidentRepository(self._store)
+        self._evidence = InMemoryEvidenceRepository(self._store)
+        self._results = InMemoryComparisonResultRepository(self._store)
+        # Exposed under the port types, not the concrete ones. ``UnitOfWork``
+        # declares these as mutable attributes, and a protocol's mutable
+        # attributes are invariant: narrowing them here makes this class stop
+        # satisfying the port it exists to implement. The concrete references
+        # are kept privately because staging is not part of the port.
+        self.incidents: IncidentRepository = self._incidents
+        self.evidence: EvidenceRepository = self._evidence
+        self.results: ComparisonResultRepository = self._results
         self._committed = False
 
     @property
@@ -223,12 +238,12 @@ class InMemoryUnitOfWork:
             self.rollback()
 
     def commit(self) -> None:
-        self.incidents.apply()
-        self.evidence.apply()
-        self.results.apply()
+        self._incidents.apply()
+        self._evidence.apply()
+        self._results.apply()
         self._committed = True
 
     def rollback(self) -> None:
-        self.incidents.discard()
-        self.evidence.discard()
-        self.results.discard()
+        self._incidents.discard()
+        self._evidence.discard()
+        self._results.discard()

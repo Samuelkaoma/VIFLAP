@@ -27,9 +27,7 @@ class _Item:
 
 
 def _corpus(n_speakers: int, per_speaker: int = 3) -> list[_Item]:
-    return [
-        _Item(f"{s:04d}", i) for s in range(n_speakers) for i in range(per_speaker)
-    ]
+    return [_Item(f"{s:04d}", i) for s in range(n_speakers) for i in range(per_speaker)]
 
 
 class TestTheProblem:
@@ -60,9 +58,9 @@ class TestTheDefault:
     def test_reserving_is_on_by_default(self) -> None:
         import inspect
 
-        default = inspect.signature(split_by_speaker).parameters[
-            "reserved_evaluation"
-        ].default
+        default = (
+            inspect.signature(split_by_speaker).parameters["reserved_evaluation"].default
+        )
         assert default is RESERVED_EVALUATION_SPEAKERS
 
     def test_it_can_be_switched_off_for_reproducing_older_artefacts(self) -> None:

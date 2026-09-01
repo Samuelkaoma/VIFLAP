@@ -171,12 +171,14 @@ class TestEveryStreamReachesTheEngine:
         result = _compare(system, analyst, case_ref, enrolled[0], enrolled[1])
         for stream in STREAMS:
             model_id = result.outcomes[stream].model_id
-            assert "+" in model_id, f"{stream.value} model id lacks a calibrator: {model_id}"
+            assert "+" in model_id, (
+                f"{stream.value} model id lacks a calibrator: {model_id}"
+            )
 
     def test_the_behavioural_decomposition_survives_to_the_result(
         self, system, enrolled, analyst, case_ref
     ) -> None:
-        """"Same operation, probably not the same person" is only visible here."""
+        """ "Same operation, probably not the same person" is only visible here."""
         result = _compare(system, analyst, case_ref, enrolled[0], enrolled[1])
         diagnostics = result.outcomes[EvidenceStream.BEHAVIOURAL].diagnostics
         assert "idiolect_component" in diagnostics
@@ -327,9 +329,7 @@ class TestGovernanceOnRealEvidence:
     def test_the_chain_verifies_after_a_full_session(
         self, system, enrolled, analyst, case_ref
     ) -> None:
-        system.search.execute(
-            SearchRequest(enrolled[0], case_ref, analyst, max_results=3)
-        )
+        system.search.execute(SearchRequest(enrolled[0], case_ref, analyst, max_results=3))
         verification = system.audit.verify()
         assert verification.is_intact
         assert verification.n_entries > len(enrolled)

@@ -517,9 +517,7 @@ class BehaviouralComparator:
         # components are the ones the forensic length requirements were measured
         # for, and below that floor they do not become weak — they become
         # unmeasured, while still producing a number that looks like the others.
-        idiolect_withheld = (
-            min(first.n_words, second.n_words) < self._min_words_idiolect
-        )
+        idiolect_withheld = min(first.n_words, second.n_words) < self._min_words_idiolect
 
         idiolect = 0.0
         if not idiolect_withheld:
@@ -531,11 +529,7 @@ class BehaviouralComparator:
                 idiolect += self._disfluencies.log_likelihood_ratio(
                     first.disfluency_counts, second.disfluency_counts
                 )
-            if (
-                self._switches is not None
-                and first.switch_counts
-                and second.switch_counts
-            ):
+            if self._switches is not None and first.switch_counts and second.switch_counts:
                 idiolect += self._switches.log_likelihood_ratio(
                     first.switch_counts, second.switch_counts
                 )

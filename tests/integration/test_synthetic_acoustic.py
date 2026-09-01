@@ -45,13 +45,17 @@ class TestBinding:
         """Two operators sharing a speaker would make two different people
         acoustically identical, which is the confound the whole corpus is built
         to keep separable."""
-        operators, _, _ = generate(n_operators=12, n_operations=4, incidents_per_operation=4)
+        operators, _, _ = generate(
+            n_operators=12, n_operations=4, incidents_per_operation=4
+        )
         bound = bind_operators(operators, _plans(40))
         chosen = [plans[0].speaker_id for plans in bound.values()]
         assert len(set(chosen)) == len(operators)
 
     def test_too_few_speakers_is_refused_not_truncated(self) -> None:
-        operators, _, _ = generate(n_operators=12, n_operations=4, incidents_per_operation=4)
+        operators, _, _ = generate(
+            n_operators=12, n_operations=4, incidents_per_operation=4
+        )
         with pytest.raises(InsufficientDataError, match="acoustically identical"):
             bind_operators(operators, _plans(5))
 

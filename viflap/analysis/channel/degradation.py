@@ -27,6 +27,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import cast
 
 import numpy as np
 import scipy.signal
@@ -100,7 +101,10 @@ def _shape_noise(
     if noise_type is NoiseType.WHITE:
         return noise
     if noise_type is NoiseType.BABBLE:
-        return np.convolve(noise, _long_term_speech_spectrum_filter(), mode="same")
+        return cast(
+            "NDArray[np.float64]",
+            np.convolve(noise, _long_term_speech_spectrum_filter(), mode="same"),
+        )
     if noise_type is NoiseType.VEHICLE:
         nyquist = sample_rate / 2.0
         sos = scipy.signal.butter(4, 250.0 / nyquist, btype="low", output="sos")

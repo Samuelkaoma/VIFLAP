@@ -437,9 +437,7 @@ def raw_scores(
         except InsufficientDataError:
             continue
         scored[stream] = (
-            outcome.total_log_lr
-            if stream is EvidenceStream.BEHAVIOURAL
-            else float(outcome)
+            outcome.total_log_lr if stream is EvidenceStream.BEHAVIOURAL else float(outcome)
         )
     return scored
 
@@ -455,9 +453,7 @@ class FittedBackEnd:
     n_same_operator_pairs: int
 
 
-def fit_back_end(
-    raw: RawComparators, development: Sequence[Incident]
-) -> FittedBackEnd:
+def fit_back_end(raw: RawComparators, development: Sequence[Incident]) -> FittedBackEnd:
     """Fit one calibrator per stream and a fusion model over their output.
 
     Same-source means **same operator**, not same operation. That choice is the
@@ -482,9 +478,7 @@ def fit_back_end(
     for first, second in _pairs(development):
         same = first.operator_id == second.operator_id
         n_same += int(same)
-        scored = raw_scores(
-            raw, payloads[first.incident_id], payloads[second.incident_id]
-        )
+        scored = raw_scores(raw, payloads[first.incident_id], payloads[second.incident_id])
         for stream, value in scored.items():
             per_stream[stream].append((value, int(same)))
         owner = "|".join(sorted((first.operator_id, second.operator_id)))
@@ -597,9 +591,7 @@ def assemble(incidents: Sequence[Incident], audit_path: Path) -> AssembledSystem
     )
     return AssembledSystem(
         ingest=IngestIncident(
-            extractors={
-                stream: _extractor_for(stream) for stream in STREAMS
-            },
+            extractors={stream: _extractor_for(stream) for stream in STREAMS},
             unit_of_work=unit_of_work,
             audit=audit,
             clock=clock,

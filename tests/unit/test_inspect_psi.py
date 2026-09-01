@@ -72,9 +72,7 @@ class TestSpectrum:
 
 
 class TestSubsampling:
-    def test_all_of_a_drawn_speaker_s_recordings_come_with_them(
-        self, labelled
-    ) -> None:
+    def test_all_of_a_drawn_speaker_s_recordings_come_with_them(self, labelled) -> None:
         vectors, labels = labelled
         _, subset_labels = subsample(vectors, labels, 10, np.random.default_rng(1))
         counts = np.unique(subset_labels, return_counts=True)[1]
@@ -116,9 +114,7 @@ class TestFitting:
         summary = spectrum(fit(*labelled).psi)
         assert summary["ratio"] > 1.5
 
-    def test_pinning_the_dimension_makes_the_sweep_vary_one_thing(
-        self, labelled
-    ) -> None:
+    def test_pinning_the_dimension_makes_the_sweep_vary_one_thing(self, labelled) -> None:
         """The sweep's whole validity.
 
         Without ``lda_dimension``, the ceiling is ``n_speakers - 1``, so a

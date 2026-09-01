@@ -35,7 +35,9 @@ from pathlib import Path
 from typing import Any
 
 #: Where the manifests live. Public, ungated, and small.
-BASE = "https://huggingface.co/datasets/intronhealth/afrispeech-200/resolve/main/transcripts"
+BASE = (
+    "https://huggingface.co/datasets/intronhealth/afrispeech-200/resolve/main/transcripts"
+)
 SPLITS = ("train.csv", "dev.csv", "test.csv")
 
 #: Seconds of total speech below which a speaker cannot supply two 30-second
@@ -76,17 +78,13 @@ def summarise(rows: Sequence[dict[str, str]]) -> dict[str, Any]:
             "usable_speakers": usable(speakers),
             "hours": round(sum(seconds[s] for s in speakers) / 3600.0, 2),
         }
-        for code, speakers in sorted(
-            countries.items(), key=lambda item: -len(item[1])
-        )
+        for code, speakers in sorted(countries.items(), key=lambda item: -len(item[1]))
     }
     by_language = {
         name: {
             "speakers": len(accents.get(name, set())),
             "usable_speakers": usable(accents.get(name, set())),
-            "hours": round(
-                sum(seconds[s] for s in accents.get(name, set())) / 3600.0, 2
-            ),
+            "hours": round(sum(seconds[s] for s in accents.get(name, set())) / 3600.0, 2),
         }
         for name in ZAMBIAN_LANGUAGES
     }
