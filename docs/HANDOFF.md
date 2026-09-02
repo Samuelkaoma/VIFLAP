@@ -22,7 +22,7 @@ git -C . log --oneline -20
 python -m pytest -q -p no:randomly
 ```
 
-Then read `docs/H1-acoustic-results.md` (~4,050 lines, §§1–26). It is the
+Then read `docs/H1-acoustic-results.md` (~4,260 lines, §§1–27). It is the
 system of record. Every claim in it is either measured or marked withdrawn in
 place; nothing is deleted.
 
@@ -87,6 +87,7 @@ acoustic.npz                    128/100, 125 spk, CMVN 300      §4/§5 baseline
 acoustic_large.npz              256/200, 125 spk                §7
 acoustic_pooled.npz             128/100, 306 spk                §9, §22 baseline
 acoustic_expanded.npz           128/100, 562 spk                §25 — 4/6 supported
+acoustic_pinned.npz             128/100, 562 spk, PINNED split  §27 — 4/6 supported
 acoustic_pooled_cmvn_utt.npz    CMVN 0                          §17 control
 acoustic_pooled_cmvn100.npz     CMVN 100                        §17 control
 acoustic_pooled_global.npz      306 spk, global allocation      §21 control
@@ -110,7 +111,10 @@ h1_neural_562_scores.npz      ECAPA per-trial scores            §26
 h1_expanded.json              i-vector on the 562 corpus        §25
 h1_expanded_scores.npz        i-vector per-trial scores (~85 min)
 h1_extractor_paired_562.json  §26's pairing, 6/6 identical, 6/6 Holm
-neural_embeddings_pinned.checkpoint.npz  IN PROGRESS — deleted on success
+neural_embeddings_pinned.npz / neural_extraction_pinned.json  §27, 585.3 min
+h1_pinned.json / h1_pinned_scores.npz     §27 i-vector, 4/6 supported
+h1_neural_pinned.json / _scores.npz       §27 ECAPA, 6/6 supported
+h1_extractor_paired_pinned.json           §27's pairing, 6/6 identical, 6/6 Holm
 h1_neural_lda100.json      the §22 dimension control
 h1_pooled_ownership.json   the i-vector baseline §22 compares to
 h1_pooled_scores.npz       i-vector per-trial scores (~43 min)
@@ -139,25 +143,29 @@ property of the old wall-clock gate rather than of the corpus.
 `h1_neural_rescored.json` and `h1_pooled_rescored.json` are byproducts of
 generating score archives and are **not** what any section quotes.
 
-**Current best: ECAPA embeddings with a 562-speaker back-end (§26).**
-`C_llr_min` **0.033 [0.023, 0.049]**, EER **1.00%** at 12.2 kbit/s clean 30 s,
-on 187 held-out speakers — **six of six cells supported**. Across the project
-the best cell runs 0.343 → 0.276 → 0.099 → 0.033.
+**Current best: ECAPA embeddings with a 562-speaker back-end on the PINNED
+split (§27).** `C_llr_min` **0.030 [0.022, 0.043]**, EER **0.93%** at 12.2
+kbit/s clean 30 s, on 187 held-out speakers of which 100 are reserved
+permanently — **six of six cells supported**, and the first sub-one-percent EER
+in the document.
 
-The four configurations, all on their own held-out speakers:
+The five configurations, each on its own held-out speakers:
 
 ```
 i-vector,  306 spk   0.276   §9 / §22 baseline
 ECAPA,     306 spk   0.099   §22 — paired, 6/6 surviving Holm
-i-vector,  562 spk   0.157   §25
-ECAPA,     562 spk   0.033   §26 — current best
+i-vector,  562 spk   0.157   §25          old split
+ECAPA,     562 spk   0.033   §26 — paired, old split
+i-vector,  562 spk   0.135   §27          PINNED
+ECAPA,     562 spk   0.030   §27 — paired, PINNED — current best
 ```
 
-**§22 is the only paired result.** §25 and §26 are standalone evaluations under
-§3's rule: their corpora differ from §22's, so the trial sets differ and no
-paired instrument applies. Do not present the 0.343 → 0.033 progression as four
-comparable measurements — they are four models on three different evaluation
-sets.
+**Three sections are internally paired — §22, §26 and §27 — and none of them is
+paired against the others.** They sit on three different evaluation sets. Do not
+present 0.343 → 0.030 as a progression of comparable measurements; it is five
+models on four sets. §27 is the one to build on, because everything computed
+under the pinned split is comparable to everything else computed under it,
+forever.
 
 Do not compare a new result against §9's table without checking which bootstrap
 it used. §9 quotes percentile intervals, §14 recomputed them as BCa, and §18
@@ -167,109 +175,44 @@ the like-for-like i-vector column.
 
 ---
 
-## 3. The pinned chain: where it has got to
+## 3. The pinned chain: complete, and written up as §27
 
-**Step 1 of 5 is done.** `neural_embeddings_pinned.npz` and
-`neural_extraction_pinned.json` exist, written 24 Aug after **585.3 minutes**
-(9 h 45 m). The checkpoint file is gone, which is how a completed run is
-recognised: it is deleted only when the final artefact has been written.
+**All five steps are done and §27 is in the document.**
 
-Verified from the archive rather than from the log — **all 100 reserved
-speakers are in the evaluation partition, none leaked into train or
-development, and the three partitions are pairwise disjoint.** Split
-562 / 187 / 187, 2827 / 933 / 937 recordings. Refusals are zero at 30 s and
-15 s and appear only at 5 s: 12 and 15 clean, 114 and 114 in babble — the same
-shape §22 reports after the gate correction (12–15 against 73–77 there, on a
-smaller corpus). **Why babble refuses roughly eight times as often is
-untested.** The obvious guess — babble filling the pauses a VAD would skip —
-predicts the wrong sign, because noise usually makes an energy-based detector
-mark *more* frames as speech. Do not write a mechanism into §27 without
-measuring one.
+| Step | Cost | Artefact |
+|---|---|---|
+| `extract_neural` | 585.3 min | `neural_embeddings_pinned.npz`, `neural_extraction_pinned.json` |
+| `train_acoustic` | 73.4 min | `models/acoustic_pinned.npz` = `ivec-plda-0a3110cdcb3c542d` |
+| `evaluate_h1` | — | `h1_pinned.json`, `h1_pinned_scores.npz` |
+| `score_neural` | — | `h1_neural_pinned.json`, `h1_neural_pinned_scores.npz` |
+| `compare_extractors` | ~105 min | `h1_extractor_paired_pinned.json` |
 
-**This was the second attempt.** The first (pid 59676, log
-`<scratchpad>/extract_pinned.log`) reached the fifth of five blocks and lost
-everything: the machine rebooted at 13:40 on 20 Aug, the log's last line is
-13:27 in `evaluation|amr12.2_babble20dB`, and the script wrote only at the end.
-It now **checkpoints after every batch** to
-`<output>.checkpoint.npz`, so relaunching the same command resumes rather than
-restarting; `--restart` discards the checkpoint, and a checkpoint whose
-fingerprint (extractor, seed, durations, corpora, split, conditions, batch size)
-does not match is refused rather than resumed. Worst case on a crash is one
-batch, ~15 min. The second attempt never needed it, so **the resume path has
-been exercised only by its tests**, not in anger.
+**§27's result.** i-vector 4 of 6 supported, **ECAPA 6 of 6**, best cell
+`C_llr_min` **0.030 [0.022, 0.043]** and EER **0.93%** — the first
+sub-one-percent EER in the document. Paired: six of six exclude zero, six
+survive Holm, **all six on identical trial sets**, 187 owners per cell.
 
-**The remaining chain, in order.** Each is a separate heavy job; run one at a
-time.
+Verified from the archive, not the log: all 100 reserved speakers in evaluation,
+none in train or development, partitions pairwise disjoint. Split 562/187/187.
 
-```bash
-python -m scripts.train_acoustic --corpus data/corpus/librispeech --corpus data/corpus/librispeech-360-full --components 128 --rank 100 --output models/acoustic_pinned.npz --report data/reports/training_pinned.json
-python -m scripts.evaluate_h1 --model models/acoustic_pinned.npz --corpus data/corpus/librispeech --corpus data/corpus/librispeech-360-full --bitrates 12.20 --noise babble --snrs 20.0 --durations 30 15 5 --resamples 2000 --output data/reports/h1_pinned.json --scores data/reports/h1_pinned_scores.npz
-python -m scripts.score_neural --embeddings data/reports/neural_embeddings_pinned.npz --extraction-report data/reports/neural_extraction_pinned.json --resamples 2000 --output data/reports/h1_neural_pinned.json --scores data/reports/h1_neural_pinned_scores.npz
-python -m scripts.compare_extractors --baseline data/reports/h1_pinned_scores.npz --variant data/reports/h1_neural_pinned_scores.npz --output data/reports/h1_extractor_paired_pinned.json --resamples 2000
-```
+Every table in §27 has been read back out of the committed markdown against its
+artefacts — 18 rows across three tables plus the prose figures. That check found
+two real errors, both in the §26-against-§27 Change column, where the value had
+been computed at full precision beside rounded inputs so the row did not add up
+as read. Fixed, and the convention is now stated in the text. The script is at
+`<scratchpad>/readback_27.py`; **run its equivalent for any table this document
+gains.**
 
-~55 min, ~85 min, ~20 min, ~60 min. Then write §27.
+**What §27 buys and does not.** Everything computed from here on is comparable
+to everything else computed from here on. It fixes nothing retrospectively: §22
+is on the 306-speaker corpus (44 of the reserved hundred), §25 and §26 are on
+the 562-speaker corpus under the *old* split. §27 recommends treating §§22–26 as
+the historical record rather than spending ~14 h to re-run §22's chain for a
+44-speaker evaluation set.
 
-**Step 2 is running now** — `train_acoustic`, log
-`<scratchpad>/train_pinned.log`. It does **not** checkpoint; if it dies it
-restarts from nothing, which at ~55 min is a cost worth accepting rather than
-engineering around.
-
-**What this buys, and what it does not.** Everything computed after it is
-comparable to everything else computed after it, forever. It does **not**
-retrospectively make §22 comparable: §22 is on the 306-speaker corpus, which
-holds only 44 of the reserved speakers, so closing that gap needs the old corpus
-chain re-run too — a further ~14 h and a 44-speaker evaluation set. Decide
-whether that is worth it before starting; the alternative is to treat §§22-26 as
-the historical record and require the pinned set from here on.
-
-The corrected-gate loop, for reference: re-extraction (365 min), scoring
-(16 min) and pairing (25 min) all done, and §22 now reports the VAD-gated run
-throughout with every table verified against its artefact.
-
-```
-neural_embeddings_vad.npz     the corrected-gate corpus  -- what §22 quotes
-neural_extraction_vad.json    12 and 73 refusals at 5 s, 0 elsewhere
-h1_neural_vad.json            the §22 result table
-h1_neural_vad_scores.npz      per-trial scores for pairing
-h1_extractor_paired_vad.json  6/6 on identical trial sets, 6/6 surviving Holm
-```
-
-The pre-registered control held exactly. Training vectors and all four 30 s and
-15 s evaluation cells are **byte-identical** between the two extractions, the
-back-end refits to the same model (ψ₁ 66.98, 35 iterations), and those four
-cells reproduce to machine precision. Only the two 5 s cells moved.
-
-The superseded archives — `neural_embeddings.npz`, `h1_neural.json`,
-`h1_extractor_paired.json` — are kept because §22's correction blocks quote the
-before-and-after. **Do not delete them and do not quote them as current.**
-
-Per-trial score archives, the expensive inputs — **do not regenerate** unless
-the trials themselves change:
-
-```
-h1_pooled_scores.npz      i-vector per-trial scores, evaluate_h1 --scores  (~43 min)
-h1_neural_vad_scores.npz  ECAPA per-trial scores, score_neural --scores    (~16 min)
-```
-
-The `evaluate_h1` rerun that produced the first doubles as a control: all six
-point estimates reproduce `h1_pooled_ownership.json` to five decimal places, so
-adding score persistence changed nothing the script computes. Its intervals
-differ in the third decimal (bootstrap noise between runs), so **§22 keeps
-quoting `h1_pooled_ownership.json`**, not `h1_pooled_rescored.json`.
-
-Timings for planning: `extract_neural` 330-365 min at ~6-7 s per recording per
-three durations, and ~630 min over the 936-speaker corpus; `score_neural
---resamples 2000` 16 min; `evaluate_h1` over 6 cells ~43 min;
-`compare_extractors` at B = 2000 about 25 min and single-threaded — each
-resample runs a PAV over 133,645 trials for both systems, plus a 102-fold
-jackknife.
-
-`extract_neural` spends its first several minutes in `scan_corpora` reading
-FLAC headers, disk-bound at ~1% CPU, before the first progress line. That is
-not a stalled job — check `UserModeTime` is still creeping rather than assuming.
-
----
+**Do not read §27's columns quoting earlier sections as comparisons.** 0.157 →
+0.135 and 0.033 → 0.030 are standalone evaluations on different sets of 187
+speakers. Only the within-section pairing is a contrast.
 
 ## 4. Settled — do not re-litigate
 

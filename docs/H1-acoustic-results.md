@@ -4113,3 +4113,149 @@ predicted it would keep falling. It did, on data §23 never saw. That is a
 prediction confirmed rather than a coincidence noted, and it is the second
 independent confirmation that the *leading eigenvalue* is a small-sample artefact
 even though the *ratio* §1 tracks is not.
+
+---
+
+## 27. One evaluation set, fixed forever: the pinned split
+
+Every section up to here carries an asterisk that §26 stated and could not
+remove. §22 is paired at 306 speakers, §26 is paired at 562, and the two sit on
+**different evaluation sets**, so the progression 0.343 → 0.276 → 0.099 → 0.033
+is four models on three sets rather than four comparable measurements.
+
+The cause is structural. `split_by_speaker` orders speakers by a seeded
+permutation and takes fractions, so *adding* speakers reshuffles everyone: a
+speaker held out at one corpus size is very likely training material at the next.
+§9 compared 125 against 306 and kept 35 of its evaluation speakers. §25 compared
+306 against 562 and kept **19** — too few to describe anyone but those nineteen.
+
+`viflap/evaluation/reserved.py` names 100 speakers that go to the evaluation
+partition of every split, at every corpus size, permanently, and
+`split_by_speaker` now defaults to it rather than taking it as an opt-in. An
+opt-in guarantee is one every caller has to remember, and forgetting is exactly
+how §9 and §25 lost their comparability — nothing warned, because both splits
+were internally valid either way.
+
+This section is the first result computed under it. The whole chain was re-run:
+extraction (585.3 min), i-vector training (73.4 min), `evaluate_h1`,
+`score_neural`, and the pairing.
+
+**The guarantee was checked rather than assumed.** Read back from
+`neural_embeddings_pinned.npz`: all 100 reserved speakers are in the evaluation
+partition, none leaked into train or development, and the three partitions are
+pairwise disjoint. Split 562 / 187 / 187 over 2,827 / 933 / 937 recordings.
+Reading it off the docstring would have established only that the docstring is
+confident.
+
+### The two systems, on one set
+
+i-vector model `ivec-plda-0a3110cdcb3c542d`, 128 components, rank 100 — §9's
+configuration unchanged. Neural back-end fitted on the same 562 training
+speakers. Artefacts: `data/reports/h1_pinned.json`,
+`data/reports/h1_neural_pinned.json`.
+
+| Condition | Dur. | i-vector | EER | H1 | **ECAPA** | EER | H1 |
+|---|---:|---|---:|:---:|---|---:|:---:|
+| clean | 30 s | 0.135 [0.114, 0.164] | 4.10% | **supported** | **0.030 [0.022, 0.043]** | **0.93%** | **supported** |
+| clean | 15 s | 0.208 [0.184, 0.248] | 6.12% | **supported** | **0.049 [0.037, 0.071]** | **1.45%** | **supported** |
+| clean | 5 s | 0.424 [0.400, 0.464] | 13.72% | inconclusive | **0.160 [0.142, 0.186]** | **4.46%** | **supported** |
+| babble 20 dB | 30 s | 0.157 [0.134, 0.188] | 4.74% | **supported** | **0.037 [0.029, 0.052]** | **1.20%** | **supported** |
+| babble 20 dB | 15 s | 0.220 [0.195, 0.254] | 6.42% | **supported** | **0.066 [0.052, 0.086]** | **1.79%** | **supported** |
+| babble 20 dB | 5 s | 0.402 [0.377, 0.446] | 12.64% | inconclusive | **0.181 [0.163, 0.210]** | **5.15%** | **supported** |
+
+Four of six for the i-vector system, **six of six for ECAPA**, and 0.93% is the
+first sub-one-percent equal error rate anywhere in this document.
+
+### The pairing
+
+Difference is `ECAPA − i-vector` on `C_llr_min`, so **negative favours the
+borrowed extractor**. BCa at B = 2000, resampling speakers, Holm over six cells.
+Artefact: `data/reports/h1_extractor_paired_pinned.json`.
+
+| Condition | Dur. | i-vector | ECAPA | Difference [95% CI] | Holm | Trials |
+|---|---:|---:|---:|---|:---:|---:|
+| clean | 30 s | 0.135 | 0.030 | **−0.105 [−0.124, −0.088]** | **✓** | 438,049 |
+| clean | 15 s | 0.208 | 0.049 | **−0.159 [−0.182, −0.137]** | **✓** | 438,049 |
+| clean | 5 s | 0.424 | 0.160 | **−0.264 [−0.294, −0.237]** | **✓** | 424,129 |
+| babble 20 dB | 30 s | 0.157 | 0.037 | **−0.120 [−0.144, −0.100]** | **✓** | 438,049 |
+| babble 20 dB | 15 s | 0.220 | 0.066 | **−0.154 [−0.180, −0.131]** | **✓** | 438,049 |
+| babble 20 dB | 5 s | 0.402 | 0.181 | **−0.221 [−0.256, −0.194]** | **✓** | 337,890 |
+
+**Six of six exclude zero, six survive Holm, and all six sit on trial sets that
+are identical between the two systems** — 187 owners in every cell. The two
+front-ends refused the same recordings, which is visible before the pairing runs
+at all: the trial counts in the two result tables match exactly, including the
+two five-second cells where refusals occur at all (15 clean, 114 babble).
+
+### What this buys, stated precisely
+
+**Everything computed from here on is comparable to everything else computed
+from here on.** Any future model — a different rank, a different extractor, a
+larger corpus that is a superset of these 936 speakers — evaluates on these same
+100 reserved speakers, and the paired instrument applies without restriction.
+That is the whole return on the ten-hour re-extraction, and it is entirely
+forward-looking.
+
+**It does not retrospectively fix anything.** §22 is on the 306-speaker corpus,
+which contains only 44 of the reserved hundred. §25 and §26 are on the
+562-speaker corpus but under the *old* unpinned split. None of them is comparable
+to this section, and re-running §22's chain to close that gap would cost a
+further ~14 h for a 44-speaker evaluation set. **The recommendation is to treat
+§§22–26 as the historical record and require the pinned set from here on**,
+rather than to spend the compute.
+
+### Three things this is not
+
+**The i-vector column is not §25 improved.** 0.157 → 0.135 at the best cell is
+two standalone evaluations on two different sets of 187 speakers, and the
+movement could be entirely that the pinned speakers are easier. Nothing here
+measures which. The same applies to ECAPA's 0.033 → 0.030 against §26. **Only
+the within-section pairing above is a comparison**; the columns quoting earlier
+sections are context, not contrast.
+
+**Part of six-of-six is the evaluation set, not the system.** The decision rule
+is on the *upper* bound, and 187 speakers give a tighter interval than 102. §25
+made this point and it applies here with the same force — with the additional
+wrinkle that this particular 187 has never been evaluated on before, so whether
+it is harder or easier than the last one is unmeasured.
+
+**§23 still governs the absolute figures.** Both axes are LibriSpeech, and §23's
+surviving explanation for the ψ₁ spike is that each LibriVox reader records in
+one room with one microphone, so a per-reader channel is confounded with the
+reader. A 0.93% equal error rate on read audiobook speech through a parametric
+channel model is not a forecast for Zambian telephony.
+
+### A control that was not asked for
+
+ψ₁ on the neural back-end is **45.38**, against §26's **45.00** on the same
+corpus under a different split. The two share a corpus size and an extractor and
+differ only in which 562 speakers trained them, and they land within 0.4 of each
+other. §23 concluded the ψ₁ spike is corpus structure rather than any particular
+sample of speakers, and this is a third observation consistent with that,
+obtained incidentally. The i-vector back-end sits at **39.06**; the gap between
+the two representations is not something this section measures.
+
+### The extractor advantage against §26
+
+Both §26 and this section pair the same two front-ends at 562 back-end speakers,
+on different evaluation sets:
+
+| Condition | Dur. | §26 (old split) | §27 (pinned) | Change |
+|---|---:|---:|---:|---:|
+| clean | 30 s | −0.124 | −0.105 | +0.019 |
+| clean | 15 s | −0.167 | −0.159 | +0.008 |
+| clean | 5 s | −0.287 | −0.264 | +0.023 |
+| babble 20 dB | 30 s | −0.124 | −0.120 | +0.004 |
+| babble 20 dB | 15 s | −0.170 | −0.154 | +0.016 |
+| babble 20 dB | 5 s | −0.261 | −0.221 | +0.040 |
+
+The Change column is the difference of the two rounded figures beside it, so
+the row adds up as read; at full precision two of the six differ by 0.001
+from that. Every cell moves the same way and by a small amount — the
+extractor's advantage is 0.004 to 0.040 smaller on the pinned set. **This is not a measurement of
+anything.** The two evaluation sets differ, so no paired instrument applies, and
+six same-signed changes of this size are as consistent with the pinned speakers
+being slightly easier for the i-vector system as with any effect on the
+extractor. It is recorded because it is the table a reader would construct
+anyway, and constructing it here with the caveat attached is better than leaving
+it to be constructed without one.
